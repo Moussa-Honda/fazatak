@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>مولد رخص فزعتك للأقساط</title>
+    <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --primary: #10b981;
+            --bg: #0f172a;
+            --card: #1e293b;
+        }
+        body {
+            font-family: 'Cairo', sans-serif;
+            background-color: var(--bg);
+            color: white;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            margin: 0;
+        }
+        .container {
+            background-color: var(--card);
+            padding: 2rem;
+            border-radius: 1.5rem;
+            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+            width: 100%;
+            max-width: 450px;
+            border: 1px border #334155;
+        }
+        h1 {
+            text-align: center;
+            color: var(--primary);
+            margin-bottom: 2rem;
+            font-size: 1.5rem;
+        }
+        .form-group {
+            margin-bottom: 1.5rem;
+        }
+        label {
+            display: block;
+            margin-bottom: 0.5rem;
+            color: #94a3b8;
+            font-size: 0.9rem;
+        }
+        input, select {
+            width: 100%;
+            padding: 0.75rem;
+            background-color: #0f172a;
+            border: 1px solid #334155;
+            border-radius: 0.75rem;
+            color: white;
+            font-size: 1.1rem;
+            text-align: center;
+            font-family: monospace;
+            box-sizing: border-box;
+        }
+        input:focus {
+            outline: none;
+            border-color: var(--primary);
+        }
+        button {
+            width: 100%;
+            padding: 1rem;
+            background-color: var(--primary);
+            color: white;
+            border: none;
+            border-radius: 0.75rem;
+            font-size: 1.1rem;
+            font-weight: bold;
+            cursor: pointer;
+            transition: transform 0.2s, background 0.2s;
+        }
+        button:hover {
+            background-color: #059669;
+        }
+        button:active {
+            transform: scale(0.98);
+        }
+        .result {
+            margin-top: 2rem;
+            padding: 1.5rem;
+            background-color: #064e3b;
+            border-radius: 1rem;
+            text-align: center;
+            display: none;
+            border: 2px dashed #10b981;
+        }
+        .code-text {
+            font-size: 2rem;
+            font-weight: bold;
+            letter-spacing: 5px;
+            color: #a7f3d0;
+            margin: 1rem 0;
+            cursor: pointer;
+        }
+        .secret-key {
+            font-size: 0.7rem;
+            color: #475569;
+            margin-top: 1rem;
+            text-align: center;
+        }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h1>مولد أكواد التفعيل 🛡️</h1>
+    
+    <div class="form-group">
+        <label>كود العميل (6 أرقام)</label>
+        <input type="text" id="deviceId" placeholder="مثلاً: 123456" maxlength="6">
+    </div>
+
+    <div class="form-group">
+        <label>مدة التفعيل</label>
+        <select id="duration">
+            <option value="30">شهر واحد (30 يوم)</option>
+            <option value="90">3 شهور (90 يوم)</option>
+            <option value="180">6 شهور (180 يوم)</option>
+            <option value="365" selected>سنة كاملة (365 يوم)</option>
+            <option value="9999">تفعيل دائم (مدى الحياة)</option>
+        </select>
+    </div>
+
+    <button onclick="generateCode()">توليد كود التفعيل</button>
+
+    <div id="resultBox" class="result">
+        <label style="color: #a7f3d0;">كود التفعيل الخاص بالعميل:</label>
+        <div class="code-text" id="activationCode" onclick="copyCode()">--------</div>
+        <p style="font-size: 0.8rem; margin: 0; color: #6ee7b7;">اضغط على الكود للنسخ</p>
+    </div>
+
+    <div class="secret-key">
+        مفتاح الأمان مدمج تلقائياً للتطابق مع التطبيق
+    </div>
+</div>
+
+<script>
+    // السر البرمجي (يجب أن يتطابق مع الموجود في التطبيق)
+    const SECRET_SALT = "NAYEF_FAZATK_2026_SECURITY_SALT";
+
+    /**
+     * وظيفة توليد كود رقمي معقد بناءً على المعطيات
+     */
+    async function generateCode() {
+        const deviceId = document.getElementById('deviceId').value;
+        const duration = document.getElementById('duration').value;
+
+        if (!deviceId || deviceId.length < 5) {
+            alert("برجاء إدخال كود عميل صحيح");
+            return;
+        }
+
+        // خوارزمية التشفير الرقمي
+        // نستخدم HMAC-SHA256 ونأخذ جزء منه نحوله لأرقام
+        const inputString = deviceId + duration + SECRET_SALT;
+        const encoder = new TextEncoder();
+        const data = encoder.encode(inputString);
+        
+        const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+        const hashArray = Array.from(new Uint8Array(hashBuffer));
+        
+        // تحويل الـ Hash إلى رقم من 8 أرقام بالضبط
+        let numericCode = 0;
+        for(let i=0; i<8; i++) {
+            numericCode = (numericCode * 256 + hashArray[i]) % 100000000;
+        }
+
+        // إضافة رقم المدة في البداية
+        let typeDigit = "0";
+        if (duration == "30") typeDigit = "1";
+        else if (duration == "90") typeDigit = "3";
+        else if (duration == "180") typeDigit = "6";
+        else if (duration == "365") typeDigit = "9";
+
+        // تنسيق الكود النهائي: [نوع المدة] + [8 أرقام مشفرة]
+        const finalCode = typeDigit + numericCode.toString().padStart(8, '0');
+
+        document.getElementById('activationCode').innerText = finalCode;
+        document.getElementById('resultBox').style.display = 'block';
+    }
+
+    function copyCode() {
+        const code = document.getElementById('activationCode').innerText;
+        navigator.clipboard.writeText(code).then(() => {
+            alert("تم نسخ الكود: " + code);
+        });
+    }
+</script>
+
+</body>
+</html>

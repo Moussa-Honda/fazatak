@@ -1,0 +1,24 @@
+{
+  "appId": "com.installment.app",
+  "appName": "فزعتك للأقساط والديون",
+  "webDir": "dist",
+  "plugins": {
+    "BiometricAuth": {
+      "biometricTitle": "المصادقة البيومترية",
+      "biometricSubTitle": "يرجى المصادقة للمتابعة",
+      "biometricNegativeButtonText": "إلغاء"
+    },
+    "Camera": {
+      "presentationStyle": "fullscreen"
+    }
+  },
+  "android": {
+    "buildOptions": {
+      "keystorePath": null,
+      "keystoreAlias": null,
+      "keystorePassword": null,
+      "keystoreAliasPassword": null,
+      "releaseType": "APK"
+    }
+  }
+}
