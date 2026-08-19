@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { portfolioService, portfolioExpenseService } from '../services/database';
 import CustodyModal from './CustodyModal';
+import { useLiveRefresh } from '../hooks/useLiveRefresh';
 
 const CustodyList = ({ onSelectCustody, isReadOnly, onRenewalRequest }) => {
   const [custodies, setCustodies] = useState([]);
@@ -35,6 +36,8 @@ const CustodyList = ({ onSelectCustody, isReadOnly, onRenewalRequest }) => {
       setLoading(false);
     }
   };
+
+  useLiveRefresh(loadCustodies);
 
   const handleDelete = async (e, id) => {
     e.stopPropagation();

@@ -1,8 +1,112 @@
 import { CapacitorSQLite, SQLiteConnection } from '@capacitor-community/sqlite';
-import CryptoJS from 'crypto-js';
+import { notifyDataChanged } from './dataEvents';
 
-const BACKUP_KEY = 'FAZATAK_SECURE_KEY_2026';
 const DB_NAME = 'fazatak_db';
+const LEGACY_WHATSAPP_TEMPLATE = 'مرحباً [الاسم]، نذكركم بموعد دفع القسط بمبلغ [المبلغ] ريال بتاريخ [التاريخ]. شكراً لتعاونكم.';
+const DEFAULT_WHATSAPP_TEMPLATE = 'مرحباً [الاسم]، نذكركم بسداد قسط [العقد] بمبلغ [المبلغ] ريال بتاريخ [التاريخ]. شكراً لتعاونكم.';
+
+const formatLocalDate = (date) => {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
+
+const getMonthKey = (date = new Date()) => {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  return `${year}-${month}`;
+};
+
+const getCurrentMonthBounds = (date = new Date()) => {
+  const start = new Date(date.getFullYear(), date.getMonth(), 1);
+  const next = new Date(date.getFullYear(), date.getMonth() + 1, 1);
+
+  return {
+    monthKey: getMonthKey(date),
+    startDate: formatLocalDate(start),
+    nextMonthDate: formatLocalDate(next),
+    todayDate: formatLocalDate(date)
+  };
+};
+
+const addLocalDays = (date, days) => {
+  const next = new Date(date);
+  next.setDate(next.getDate() + days);
+  return next;
+};
+
+const addLocalMonths = (dateInput, months) => {
+  const date = new Date(dateInput);
+  const originalDay = date.getDate();
+  const next = new Date(date);
+  next.setMonth(next.getMonth() + months);
+
+  if (next.getDate() !== originalDay) {
+    next.setDate(0);
+  }
+
+  return next;
+};
+
+const roundCurrency = (value) => Math.round((Number(value) || 0) * 100) / 100;
+
+const paidAmountSql = (alias = '') => {
+  const prefix = alias ? `${alias}.` : '';
+  return `CASE WHEN ${prefix}status = 'paid' AND (${prefix}actual_paid IS NULL OR ${prefix}actual_paid = 0) THEN ${prefix}amount ELSE COALESCE(${prefix}actual_paid, 0) END`;
+};
+
+const getPaidAmount = (installment) => {
+  const actualPaid = Number(installment?.actual_paid || 0);
+  const status = String(installment?.status || '').trim().toLowerCase();
+  if (status === 'paid' && actualPaid <= 0) {
+    return Number(installment?.amount || 0);
+  }
+  return actualPaid;
+};
+
+const getRemainingAmount = (installment) => {
+  return Math.max(0, roundCurrency(Number(installment?.amount || 0) - getPaidAmount(installment)));
+};
+
+const buildInstallmentSchedule = ({ totalAmount, monthlyAmount, installmentCount, firstDueDate }) => {
+  const total = roundCurrency(totalAmount);
+  const monthly = roundCurrency(monthlyAmount);
+  const months = Number(installmentCount);
+  const totalMonths = Math.ceil(months);
+
+  if (total <= 0 || monthly <= 0 || months <= 0 || totalMonths <= 0) {
+    throw new Error('يرجى إدخال إجمالي العقد والقسط الشهري وعدد الأقساط بشكل صحيح');
+  }
+
+  const regularMonths = Math.max(0, totalMonths - 1);
+  const lastAmount = roundCurrency(total - (monthly * regularMonths));
+
+  if (lastAmount > monthly * 2) {
+    const requiredMonths = Math.ceil((total - (monthly * 2)) / monthly) + 1;
+    throw new Error(`عدد الأقساط غير كافٍ. المطلوب ${requiredMonths} أقساط على الأقل.`);
+  }
+
+  if (lastAmount < monthly) {
+    const maxMonths = Math.max(1, Math.floor(total / monthly));
+    throw new Error(`عدد الأقساط زائد. الحد الأقصى المناسب ${maxMonths} أقساط.`);
+  }
+
+  const firstDate = firstDueDate ? new Date(firstDueDate) : new Date();
+  const rows = [];
+
+  for (let i = 0; i < totalMonths; i++) {
+    const dueDate = new Date(firstDate);
+    dueDate.setMonth(dueDate.getMonth() + i);
+
+    rows.push({
+      amount: i < regularMonths ? monthly : lastAmount,
+      due_date: dueDate.toISOString().split('T')[0]
+    });
+  }
+
+  return rows;
+};
 
 let sqlite = null;
 let db = null;
@@ -16,14 +120,14 @@ export const initDatabase = async () => {
       sqlite = new SQLiteConnection(CapacitorSQLite);
     
     // 1. Consistency Check
-    try { await sqlite.checkConnectionsConsistency(); } catch (e) {}
+    try { await sqlite.checkConnectionsConsistency(); } catch {}
 
     // 2. Identify Platform
     let platform = 'android';
     try {
       const platformResult = await sqlite.getPlatform();
       platform = platformResult.platform;
-    } catch (e) {}
+    } catch {}
     
     if (platform === 'web') {
       await sqlite.initWebStore();
@@ -44,7 +148,7 @@ export const initDatabase = async () => {
       // Fallback: try to retrieve anyway if isConnection failed
       try {
         db = await sqlite.retrieveConnection(DB_NAME, false);
-      } catch (e) {
+      } catch {
         db = await sqlite.createConnection(DB_NAME, false, 'secret', 1, false);
       }
     }
@@ -135,8 +239,36 @@ const createTables = async () => {
       value TEXT
     );
 
+    CREATE TABLE IF NOT EXISTS customer_month_statuses (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      customer_id INTEGER NOT NULL,
+      month_key TEXT NOT NULL,
+      status TEXT DEFAULT 'none' CHECK(status IN ('none', 'paid', 'postponed', 'overdue')),
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE(customer_id, month_key),
+      FOREIGN KEY (customer_id) REFERENCES customers(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS installment_postponements (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      installment_id INTEGER NOT NULL,
+      contract_id INTEGER NOT NULL,
+      mode TEXT NOT NULL CHECK(mode IN ('end', 'next')),
+      postponed_amount REAL NOT NULL,
+      target_installment_id INTEGER,
+      target_original_amount REAL,
+      generated_installment_id INTEGER,
+      status TEXT DEFAULT 'active' CHECK(status IN ('active', 'undone')),
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      undone_at DATETIME,
+      FOREIGN KEY (installment_id) REFERENCES installments(id) ON DELETE CASCADE,
+      FOREIGN KEY (contract_id) REFERENCES contracts(id) ON DELETE CASCADE,
+      FOREIGN KEY (target_installment_id) REFERENCES installments(id) ON DELETE SET NULL,
+      FOREIGN KEY (generated_installment_id) REFERENCES installments(id) ON DELETE SET NULL
+    );
+
     INSERT OR IGNORE INTO settings (key, value) VALUES 
-      ('whatsapp_template', 'مرحباً [الاسم]، نذكركم بموعد دفع القسط بمبلغ [المبلغ] ريال بتاريخ [التاريخ]. شكراً لتعاونكم.'),
+      ('whatsapp_template', '${DEFAULT_WHATSAPP_TEMPLATE}'),
       ('biometric_enabled', 'true'),
       ('quick_payment_mode', 'false'),
       ('privacy_mode', 'false'),
@@ -148,10 +280,15 @@ const createTables = async () => {
       ('account_type', 'individual'),
       ('business_name', ''),
       ('business_contact', ''),
+      ('tax_number', ''),
       ('show_details_on_pdf', 'false'),
       ('show_general_customers', 'true'),
       ('overdue_threshold_days', '30'),
-      ('stagnancy_threshold_days', '90');
+      ('stagnancy_threshold_days', '90'),
+      ('installment_notifications_enabled', 'false'),
+      ('installment_notification_days_before', '1'),
+      ('installment_notification_time', '09:00'),
+      ('installment_overdue_notifications_enabled', 'true');
 
     CREATE TABLE IF NOT EXISTS portfolios (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -174,21 +311,42 @@ const createTables = async () => {
   
   await db.execute(schema);
 
+  try {
+    await db.run(`UPDATE settings SET value = ? WHERE key = 'whatsapp_template' AND value = ?`, [
+      DEFAULT_WHATSAPP_TEMPLATE,
+      LEGACY_WHATSAPP_TEMPLATE
+    ]);
+  } catch {}
+
+  try {
+    await db.run(`UPDATE installments SET actual_paid = amount WHERE status = 'paid' AND (actual_paid IS NULL OR actual_paid = 0)`);
+  } catch {}
+
   // Ensure manager_id column exists for existing users
   try {
     await db.execute('ALTER TABLE customers ADD COLUMN manager_id INTEGER');
-  } catch (e) {}
+  } catch {}
 
   // Ensure is_manually_flagged_as_overdue column exists for existing users
   try {
     await db.execute('ALTER TABLE customers ADD COLUMN is_manually_flagged_as_overdue INTEGER DEFAULT 0');
-  } catch (e) {}
+  } catch {}
 
   // Ensure is_deleted and deleted_at columns exist
   try {
     await db.execute('ALTER TABLE customers ADD COLUMN is_deleted INTEGER DEFAULT 0');
     await db.execute('ALTER TABLE customers ADD COLUMN deleted_at DATETIME');
-  } catch (e) {}
+  } catch {}
+
+  await db.execute(`
+    CREATE INDEX IF NOT EXISTS idx_customers_manager_deleted_status ON customers(manager_id, is_deleted, status);
+    CREATE INDEX IF NOT EXISTS idx_customers_manual_overdue ON customers(is_manually_flagged_as_overdue);
+    CREATE INDEX IF NOT EXISTS idx_contracts_customer_status ON contracts(customer_id, status);
+    CREATE INDEX IF NOT EXISTS idx_installments_contract_status_due ON installments(contract_id, status, due_date);
+    CREATE INDEX IF NOT EXISTS idx_installments_status_due ON installments(status, due_date);
+    CREATE INDEX IF NOT EXISTS idx_customer_month_statuses_month_customer ON customer_month_statuses(month_key, customer_id);
+    CREATE INDEX IF NOT EXISTS idx_installment_postponements_installment_status ON installment_postponements(installment_id, status);
+  `);
 };
 
 export const getDatabase = async () => {
@@ -213,7 +371,9 @@ export const customerService = {
       customer.manager_id || null,
       customer.is_manually_flagged_as_overdue ? 1 : 0
     ]);
-    return result.changes?.lastId || result.lastId;
+    const id = result.changes?.lastId || result.lastId;
+    notifyDataChanged({ scope: 'customers', action: 'create', id });
+    return id;
   },
 
   async getAll(activeOnly = false, managerId = null, includeDeleted = false) {
@@ -268,6 +428,7 @@ export const customerService = {
       finalFlagged ? 1 : 0,
       id
     ]);
+    notifyDataChanged({ scope: 'customers', action: 'update', id });
   },
 
   async delete(id) {
@@ -276,6 +437,7 @@ export const customerService = {
       // Soft delete
       const database = await getDatabase();
       await database.run(`UPDATE customers SET is_deleted = 1, deleted_at = CURRENT_TIMESTAMP WHERE id = ?`, [id]);
+      notifyDataChanged({ scope: 'customers', action: 'delete', id });
     } else {
       await this.hardDelete(id);
     }
@@ -289,11 +451,13 @@ export const customerService = {
     await database.run(`DELETE FROM contracts WHERE customer_id = ?`, [id]);
     // Delete the customer
     await database.run(`DELETE FROM customers WHERE id = ?`, [id]);
+    notifyDataChanged({ scope: 'customers', action: 'hard-delete', id });
   },
 
   async restore(id) {
     const database = await getDatabase();
     await database.run(`UPDATE customers SET is_deleted = 0, deleted_at = NULL WHERE id = ?`, [id]);
+    notifyDataChanged({ scope: 'customers', action: 'restore', id });
   },
 
   async autoCleanupDeletedCustomers() {
@@ -305,6 +469,7 @@ export const customerService = {
           await this.hardDelete(row.id);
         }
         console.log(`Auto-cleaned ${result.values.length} deleted customers.`);
+        notifyDataChanged({ scope: 'customers', action: 'auto-cleanup' });
       }
     } catch (e) {
       console.error('Auto cleanup error:', e);
@@ -314,6 +479,7 @@ export const customerService = {
   async incrementLatePayments(customerId) {
     const database = await getDatabase();
     await database.run(`UPDATE customers SET late_payments = late_payments + 1 WHERE id = ?`, [customerId]);
+    notifyDataChanged({ scope: 'customers', action: 'increment-late-payments', id: customerId });
   },
 
   async getCreditScore(customerId) {
@@ -323,6 +489,122 @@ export const customerService = {
     if (late === 0) return 'A';
     if (late <= 2) return 'B';
     return 'C';
+  },
+
+  async setCurrentMonthStatus(customerId, status) {
+    const safeStatus = ['none', 'paid', 'postponed', 'overdue'].includes(status) ? status : 'none';
+    const monthKey = getMonthKey();
+    const database = await getDatabase();
+
+    const existing = await database.query(
+      `SELECT id FROM customer_month_statuses WHERE customer_id = ? AND month_key = ? LIMIT 1`,
+      [customerId, monthKey]
+    );
+
+    if (existing.values?.[0]?.id) {
+      await database.run(
+        `UPDATE customer_month_statuses SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
+        [safeStatus, existing.values[0].id]
+      );
+    } else {
+      await database.run(
+        `INSERT INTO customer_month_statuses (customer_id, month_key, status) VALUES (?, ?, ?)`,
+        [customerId, monthKey, safeStatus]
+      );
+    }
+
+    notifyDataChanged({ scope: 'customer_month_statuses', action: 'update', id: customerId, monthKey });
+  },
+
+  async getCurrentMonthStatusMap(customerIds = []) {
+    const ids = [...new Set(customerIds.map(id => Number(id)).filter(Boolean))];
+    if (ids.length === 0) return {};
+
+    const database = await getDatabase();
+    const { monthKey, startDate, nextMonthDate, todayDate } = getCurrentMonthBounds();
+    const placeholders = ids.map(() => '?').join(',');
+    const statusMap = ids.reduce((map, id) => {
+      map[id] = 'none';
+      return map;
+    }, {});
+
+    const stored = await database.query(
+      `
+        SELECT customer_id, status
+        FROM customer_month_statuses
+        WHERE month_key = ?
+        AND customer_id IN (${placeholders})
+      `,
+      [monthKey, ...ids]
+    );
+
+    for (const row of stored.values || []) {
+      statusMap[row.customer_id] = row.status || 'none';
+    }
+
+    const paid = await database.query(
+      `
+        SELECT DISTINCT c.customer_id
+        FROM contracts c
+        JOIN installments i ON i.contract_id = c.id
+        WHERE c.status = 'active'
+        AND c.customer_id IN (${placeholders})
+        AND i.status = 'paid'
+        AND (
+          (i.due_date >= ? AND i.due_date < ?)
+          OR (i.paid_at IS NOT NULL AND date(i.paid_at) >= ? AND date(i.paid_at) < ?)
+        )
+      `,
+      [...ids, startDate, nextMonthDate, startDate, nextMonthDate]
+    );
+
+    for (const row of paid.values || []) {
+      if (statusMap[row.customer_id] === 'none') {
+        statusMap[row.customer_id] = 'paid';
+      }
+    }
+
+    const postponed = await database.query(
+      `
+        SELECT DISTINCT c.customer_id
+        FROM contracts c
+        JOIN installments i ON i.contract_id = c.id
+        WHERE c.status = 'active'
+        AND c.customer_id IN (${placeholders})
+        AND i.status = 'postponed'
+        AND i.due_date >= ?
+        AND i.due_date < ?
+      `,
+      [...ids, startDate, nextMonthDate]
+    );
+
+    for (const row of postponed.values || []) {
+      if (statusMap[row.customer_id] === 'none') {
+        statusMap[row.customer_id] = 'postponed';
+      }
+    }
+
+    const overdue = await database.query(
+      `
+        SELECT DISTINCT c.customer_id
+        FROM contracts c
+        JOIN installments i ON i.contract_id = c.id
+        WHERE c.status = 'active'
+        AND c.customer_id IN (${placeholders})
+        AND i.status = 'pending'
+        AND i.due_date >= ?
+        AND i.due_date < ?
+      `,
+      [...ids, startDate, todayDate]
+    );
+
+    for (const row of overdue.values || []) {
+      if (statusMap[row.customer_id] === 'none') {
+        statusMap[row.customer_id] = 'overdue';
+      }
+    }
+
+    return statusMap;
   },
 
   // Auto-archive a customer when all their contracts are completed/paid
@@ -341,6 +623,7 @@ export const customerService = {
       if (activeCount === 0 && customer.status === 'active') {
         await db.run(`UPDATE customers SET status = 'archived' WHERE id = ?`, [customerId]);
         console.log(`Customer ${customerId} auto-archived after early settlement.`);
+        notifyDataChanged({ scope: 'customers', action: 'archive', id: customerId });
       }
     } catch (err) {
       // Non-fatal: log but don't re-throw so the settlement still reports success
@@ -364,15 +647,17 @@ export const contractService = {
       contract.guarantor_phone || null, 
       contract.status || 'active'
     ]);
-    return result.changes?.lastId || result.lastId;
+    const id = result.changes?.lastId || result.lastId;
+    notifyDataChanged({ scope: 'contracts', action: 'create', id, customerId: contract.customer_id });
+    return id;
   },
 
   async getByCustomerId(customerId) {
     const database = await getDatabase();
     const sql = `
       SELECT c.*, 
-        (SELECT SUM(amount) FROM installments WHERE contract_id = c.id) as total_installments,
-        (SELECT SUM(actual_paid) FROM installments WHERE contract_id = c.id) as total_paid
+        (SELECT COALESCE(SUM(amount), 0) FROM installments WHERE contract_id = c.id) as total_installments,
+        (SELECT COALESCE(SUM(${paidAmountSql()}), 0) FROM installments WHERE contract_id = c.id) as total_paid
       FROM contracts c
       WHERE c.customer_id = ?
       ORDER BY c.creation_date DESC
@@ -383,7 +668,14 @@ export const contractService = {
 
   async getById(id) {
     const database = await getDatabase();
-    const result = await database.query(`SELECT * FROM contracts WHERE id = ?`, [id]);
+    const sql = `
+      SELECT c.*,
+        (SELECT COALESCE(SUM(amount), 0) FROM installments WHERE contract_id = c.id) as total_installments,
+        (SELECT COALESCE(SUM(${paidAmountSql()}), 0) FROM installments WHERE contract_id = c.id) as total_paid
+      FROM contracts c
+      WHERE c.id = ?
+    `;
+    const result = await database.query(sql, [id]);
     return result.values?.[0] || null;
   },
 
@@ -405,6 +697,98 @@ export const contractService = {
       data.status || 'active', 
       id
     ]);
+    notifyDataChanged({ scope: 'contracts', action: 'update', id, customerId: data.customer_id });
+  },
+
+  async reschedule(id, contract, schedule) {
+    const database = await getDatabase();
+    const existing = await this.getById(id);
+    if (!existing) throw new Error('تعذر العثور على العقد');
+
+    const data = { ...existing, ...contract };
+    const rows = buildInstallmentSchedule({
+      totalAmount: data.total_amount,
+      monthlyAmount: schedule.monthly_amount,
+      installmentCount: schedule.installment_count,
+      firstDueDate: schedule.first_due_date
+    });
+
+    const oldInstallments = await installmentService.getByContractId(id);
+    const totalPaid = roundCurrency(oldInstallments.reduce((sum, item) => sum + getPaidAmount(item), 0));
+    const paidAt = oldInstallments
+      .filter(item => getPaidAmount(item) > 0 && item.paid_at)
+      .map(item => item.paid_at)
+      .sort()
+      .pop() || null;
+
+    if (totalPaid > Number(data.total_amount || 0)) {
+      throw new Error('المدفوع الحالي أكبر من إجمالي العقد الجديد');
+    }
+
+    let remainingCredit = totalPaid;
+    const rescheduledRows = rows.map((row) => {
+      const applied = roundCurrency(Math.min(remainingCredit, row.amount));
+      remainingCredit = roundCurrency(remainingCredit - applied);
+
+      return {
+        ...row,
+        actual_paid: applied,
+        status: applied >= row.amount ? 'paid' : 'pending',
+        paid_at: applied > 0 ? paidAt : null
+      };
+    });
+
+    let transactionStarted = false;
+
+    try {
+      await database.beginTransaction();
+      transactionStarted = true;
+
+      await database.run(
+        `UPDATE contracts SET title = ?, capital_amount = ?, total_amount = ?, discount_amount = 0, guarantor_name = ?, guarantor_phone = ?, status = ? WHERE id = ?`,
+        [
+          data.title,
+          data.capital_amount || 0,
+          data.total_amount,
+          data.guarantor_name || null,
+          data.guarantor_phone || null,
+          totalPaid >= Number(data.total_amount || 0) ? 'completed' : 'active',
+          id
+        ],
+        false
+      );
+
+      await database.run(`DELETE FROM installments WHERE contract_id = ?`, [id], false);
+
+      for (const row of rescheduledRows) {
+        await database.run(
+          `INSERT INTO installments (contract_id, amount, due_date, status, actual_paid, paid_at) VALUES (?, ?, ?, ?, ?, ?)`,
+          [id, row.amount, row.due_date, row.status, row.actual_paid, row.paid_at],
+          false
+        );
+      }
+
+      await database.commitTransaction();
+      transactionStarted = false;
+
+      notifyDataChanged({ scope: 'contracts', action: 'reschedule', id, customerId: data.customer_id });
+
+      return {
+        totalPaid,
+        installmentsCount: rescheduledRows.length,
+        remaining: roundCurrency(Number(data.total_amount || 0) - totalPaid)
+      };
+    } catch (error) {
+      if (transactionStarted) {
+        try {
+          await database.rollbackTransaction();
+        } catch (rollbackError) {
+          console.warn('Reschedule rollback failed:', rollbackError);
+        }
+      }
+
+      throw error;
+    }
   },
 
   async delete(id) {
@@ -413,6 +797,7 @@ export const contractService = {
     await database.run(`DELETE FROM installments WHERE contract_id = ?`, [id]);
     // Delete the contract
     await database.run(`DELETE FROM contracts WHERE id = ?`, [id]);
+    notifyDataChanged({ scope: 'contracts', action: 'delete', id });
   },
 
   async applyEarlySettlement(contractId, discountAmount) {
@@ -438,8 +823,15 @@ export const contractService = {
       );
     }
 
+    try {
+      await customerService.setCurrentMonthStatus(contract.customer_id, 'paid');
+    } catch (statusError) {
+      console.warn('Monthly status update failed:', statusError);
+    }
+
     // Auto-archive customer if no more active contracts (non-fatal if it fails)
     await customerService.checkAndArchive(contract.customer_id);
+    notifyDataChanged({ scope: 'contracts', action: 'early-settlement', id: contractId, customerId: contract.customer_id });
   },
 
   async getRemainingBalance(contractId) {
@@ -447,10 +839,110 @@ export const contractService = {
     if (!contract) return 0;
 
     const installments = await installmentService.getByContractId(contractId);
-    const totalPaid = installments.reduce((sum, i) => sum + (i.actual_paid || 0), 0);
+    const totalPaid = installments.reduce((sum, i) => sum + getPaidAmount(i), 0);
     const discount = contract.discount_amount || 0;
 
-    return (contract.total_amount || 0) - totalPaid - discount;
+    return Math.max(0, roundCurrency((contract.total_amount || 0) - totalPaid - discount));
+  },
+
+  async getCustomerBalanceSummaries(customerIds = []) {
+    const ids = [...new Set(customerIds.map(id => Number(id)).filter(Boolean))];
+    if (ids.length === 0) return {};
+
+    const database = await getDatabase();
+    const placeholders = ids.map(() => '?').join(',');
+    const summaries = {};
+
+    ids.forEach(id => {
+      summaries[id] = {
+        contract_count: 0,
+        active_contract_count: 0,
+        total_contracts: 0,
+        total_discounts: 0,
+        total_paid: 0,
+        total_remaining: 0
+      };
+    });
+
+    const contractResult = await database.query(
+      `
+        SELECT
+          customer_id,
+          COUNT(*) as contract_count,
+          COALESCE(SUM(CASE WHEN status = 'active' THEN 1 ELSE 0 END), 0) as active_contract_count,
+          COALESCE(SUM(CASE WHEN status = 'active' THEN total_amount ELSE 0 END), 0) as total_contracts,
+          COALESCE(SUM(CASE WHEN status = 'active' THEN COALESCE(discount_amount, 0) ELSE 0 END), 0) as total_discounts
+        FROM contracts
+        WHERE customer_id IN (${placeholders})
+        GROUP BY customer_id
+      `,
+      ids
+    );
+
+    for (const row of contractResult.values || []) {
+      const id = Number(row.customer_id);
+      summaries[id] = {
+        ...summaries[id],
+        contract_count: Number(row.contract_count || 0),
+        active_contract_count: Number(row.active_contract_count || 0),
+        total_contracts: Number(row.total_contracts || 0),
+        total_discounts: Number(row.total_discounts || 0)
+      };
+    }
+
+    const paidResult = await database.query(
+      `
+        SELECT
+          c.customer_id,
+          COALESCE(SUM(${paidAmountSql('i')}), 0) as total_paid
+        FROM contracts c
+        JOIN installments i ON i.contract_id = c.id
+        WHERE c.status = 'active'
+        AND c.customer_id IN (${placeholders})
+        GROUP BY c.customer_id
+      `,
+      ids
+    );
+
+    for (const row of paidResult.values || []) {
+      const id = Number(row.customer_id);
+      summaries[id].total_paid = Number(row.total_paid || 0);
+    }
+
+    Object.values(summaries).forEach(summary => {
+      summary.total_remaining = Math.max(
+        0,
+        roundCurrency(summary.total_contracts - summary.total_paid - summary.total_discounts)
+      );
+    });
+
+    return summaries;
+  },
+
+  async getOverdueCustomerMap(customerIds = [], overdueThreshold = 30) {
+    const ids = [...new Set(customerIds.map(id => Number(id)).filter(Boolean))];
+    if (ids.length === 0) return {};
+
+    const database = await getDatabase();
+    const days = Math.max(0, parseInt(overdueThreshold, 10) || 30);
+    const placeholders = ids.map(() => '?').join(',');
+    const result = await database.query(
+      `
+        SELECT DISTINCT c.customer_id
+        FROM contracts c
+        JOIN installments i ON i.contract_id = c.id
+        WHERE c.status = 'active'
+        AND i.status = 'pending'
+        AND i.due_date < date('now', ?)
+        AND c.customer_id IN (${placeholders})
+      `,
+      [`-${days} days`, ...ids]
+    );
+
+    return (result.values || []).reduce((map, row) => {
+      map[row.customer_id] = true;
+      return map;
+    }, {});
   },
 
   async getTotalRemainingByCustomer(customerId) {
@@ -476,7 +968,9 @@ export const installmentService = {
       installment.due_date, 
       installment.status || 'pending'
     ]);
-    return result.changes?.lastId || result.lastId;
+    const id = result.changes?.lastId || result.lastId;
+    notifyDataChanged({ scope: 'installments', action: 'create', id, contractId: installment.contract_id });
+    return id;
   },
 
   async getByContractId(contractId) {
@@ -496,63 +990,291 @@ export const installmentService = {
     if (!installment) return;
 
     const database = await getDatabase();
-    const totalPaid = actualPaid + discount;
-    const currentRemaining = installment.amount - (installment.actual_paid || 0);
-    let remaining = totalPaid - currentRemaining;
-    
-    if (remaining >= 0) {
-      // Fully paid or overpaid
-      await database.run(
-        `UPDATE installments SET status = 'paid', actual_paid = ?, receipt_image_path = ?, paid_at = CURRENT_TIMESTAMP WHERE id = ?`, 
-        [installment.amount, receiptPath, id]
-      );
-      
-      // Distribute excess if any
-      if (remaining > 0) {
-        const pending = await database.query(
-          `SELECT * FROM installments WHERE contract_id = ? AND status = 'pending' AND id != ? ORDER BY due_date ASC`,
-          [installment.contract_id, id]
-        );
-        
-        for (const next of pending.values || []) {
-          if (remaining <= 0) break;
-          const nextRemaining = next.amount - (next.actual_paid || 0);
-          const toApply = Math.min(remaining, nextRemaining);
-          const newPaid = (next.actual_paid || 0) + toApply;
-          
-          if (newPaid >= next.amount) {
-            await database.run(`UPDATE installments SET status = 'paid', actual_paid = ?, paid_at = CURRENT_TIMESTAMP WHERE id = ?`, [next.amount, next.id]);
-          } else {
-            await database.run(`UPDATE installments SET actual_paid = ? WHERE id = ?`, [newPaid, next.id]);
-          }
-          remaining -= toApply;
-        }
-      }
-    } else {
-      // Shortage (partial payment)
-      const shortage = Math.abs(remaining);
-      const nextPendingResult = await database.query(
-        `SELECT * FROM installments WHERE contract_id = ? AND status = 'pending' AND id != ? ORDER BY due_date ASC LIMIT 1`,
-        [installment.contract_id, id]
-      );
-      
-      if (nextPendingResult.values?.length > 0) {
-        const next = nextPendingResult.values[0];
-        // Carry over to next
-        await database.run(`UPDATE installments SET amount = amount + ? WHERE id = ?`, [shortage, next.id]);
-        // Mark current as paid with what was actually paid
+    let remainingPayment = roundCurrency((Number(actualPaid) || 0) + (Number(discount) || 0));
+    if (remainingPayment <= 0) return;
+
+    const applyPayment = async (target, amountToApply, includeReceipt = false) => {
+      const due = Number(target.amount || 0);
+      const paidBefore = getPaidAmount(target);
+      const remainingDue = Math.max(0, roundCurrency(due - paidBefore));
+      const applied = roundCurrency(Math.min(amountToApply, remainingDue));
+      const paidAfter = roundCurrency(paidBefore + applied);
+      const isPaid = paidAfter + 0.009 >= due;
+      const finalPaid = isPaid ? due : paidAfter;
+
+      if (includeReceipt) {
         await database.run(
-          `UPDATE installments SET status = 'paid', actual_paid = ?, receipt_image_path = ?, paid_at = CURRENT_TIMESTAMP WHERE id = ?`,
-          [(installment.actual_paid || 0) + actualPaid, receiptPath, id]
+          `UPDATE installments SET status = ?, actual_paid = ?, receipt_image_path = ?, paid_at = CURRENT_TIMESTAMP WHERE id = ?`,
+          [isPaid ? 'paid' : 'pending', finalPaid, receiptPath, target.id]
         );
       } else {
-        // Last installment or no next pending, keep as pending and update paid amount
         await database.run(
-          `UPDATE installments SET actual_paid = ?, receipt_image_path = ?, paid_at = CURRENT_TIMESTAMP WHERE id = ?`,
-          [(installment.actual_paid || 0) + actualPaid, receiptPath, id]
+          `UPDATE installments SET status = ?, actual_paid = ?, paid_at = CURRENT_TIMESTAMP WHERE id = ?`,
+          [isPaid ? 'paid' : 'pending', finalPaid, target.id]
         );
       }
+
+      return applied;
+    };
+
+    const paidCurrent = await applyPayment(installment, remainingPayment, true);
+    remainingPayment = roundCurrency(remainingPayment - paidCurrent);
+
+    if (remainingPayment > 0) {
+      const pending = await database.query(
+        `SELECT * FROM installments WHERE contract_id = ? AND status = 'pending' AND id != ? ORDER BY due_date DESC, id DESC`,
+        [installment.contract_id, id]
+      );
+
+      for (const next of pending.values || []) {
+        if (remainingPayment <= 0) break;
+        const applied = await applyPayment(next, remainingPayment);
+        remainingPayment = roundCurrency(remainingPayment - applied);
+      }
     }
+
+    const updatedInstallment = await this.getById(id);
+    const contract = await contractService.getById(installment.contract_id);
+    if (contract && updatedInstallment && getRemainingAmount(updatedInstallment) <= 0) {
+      try {
+        await customerService.setCurrentMonthStatus(contract.customer_id, 'paid');
+      } catch (statusError) {
+        console.warn('Monthly status update failed:', statusError);
+      }
+    }
+
+    notifyDataChanged({ scope: 'installments', action: 'pay', id, contractId: installment.contract_id });
+  },
+
+  async postpone(id, mode = 'end') {
+    const installment = await this.getById(id);
+    if (!installment || installment.status !== 'pending') return;
+
+    const database = await getDatabase();
+    const remainingAmount = getRemainingAmount(installment);
+    if (remainingAmount <= 0) {
+      await database.run(
+        `UPDATE installments SET status = 'paid', actual_paid = ?, paid_at = CURRENT_TIMESTAMP WHERE id = ?`,
+        [installment.amount, id]
+      );
+      const contract = await contractService.getById(installment.contract_id);
+      if (contract) {
+        try {
+          await customerService.setCurrentMonthStatus(contract.customer_id, 'paid');
+        } catch (statusError) {
+          console.warn('Monthly status update failed:', statusError);
+        }
+      }
+      notifyDataChanged({ scope: 'installments', action: 'postpone', id, contractId: installment.contract_id });
+      return;
+    }
+
+    let transactionStarted = false;
+    let generatedInstallmentId = null;
+    let targetInstallmentId = null;
+    let targetOriginalAmount = null;
+
+    try {
+      await database.beginTransaction();
+      transactionStarted = true;
+
+      await database.run(`UPDATE installments SET status = 'postponed', is_late = 0 WHERE id = ?`, [id], false);
+
+      if (mode === 'next') {
+        const nextResult = await database.query(
+          `SELECT * FROM installments WHERE contract_id = ? AND status = 'pending' AND due_date > ? ORDER BY due_date ASC, id ASC LIMIT 1`,
+          [installment.contract_id, installment.due_date]
+        );
+
+        const next = nextResult.values?.[0];
+        if (next) {
+          targetInstallmentId = next.id;
+          targetOriginalAmount = Number(next.amount || 0);
+          await database.run(`UPDATE installments SET amount = amount + ? WHERE id = ?`, [remainingAmount, next.id], false);
+        } else {
+          const lastResult = await database.query(
+            `SELECT due_date FROM installments WHERE contract_id = ? ORDER BY due_date DESC, id DESC LIMIT 1`,
+            [installment.contract_id]
+          );
+          const lastDate = lastResult.values?.[0]?.due_date || installment.due_date;
+          const insertResult = await database.run(
+            `INSERT INTO installments (contract_id, amount, due_date, status, actual_paid) VALUES (?, ?, ?, 'pending', 0)`,
+            [installment.contract_id, remainingAmount, formatLocalDate(addLocalMonths(lastDate, 1))],
+            false
+          );
+          generatedInstallmentId = insertResult.changes?.lastId || insertResult.lastId;
+        }
+      } else {
+        const lastResult = await database.query(
+          `SELECT due_date FROM installments WHERE contract_id = ? ORDER BY due_date DESC, id DESC LIMIT 1`,
+          [installment.contract_id]
+        );
+        const lastDate = lastResult.values?.[0]?.due_date || installment.due_date;
+        const insertResult = await database.run(
+          `INSERT INTO installments (contract_id, amount, due_date, status, actual_paid) VALUES (?, ?, ?, 'pending', 0)`,
+          [installment.contract_id, remainingAmount, formatLocalDate(addLocalMonths(lastDate, 1))],
+          false
+        );
+        generatedInstallmentId = insertResult.changes?.lastId || insertResult.lastId;
+      }
+
+      await database.run(
+        `INSERT INTO installment_postponements
+          (installment_id, contract_id, mode, postponed_amount, target_installment_id, target_original_amount, generated_installment_id)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        [
+          id,
+          installment.contract_id,
+          mode === 'next' ? 'next' : 'end',
+          remainingAmount,
+          targetInstallmentId,
+          targetOriginalAmount,
+          generatedInstallmentId
+        ],
+        false
+      );
+
+      await database.commitTransaction();
+      transactionStarted = false;
+    } catch (error) {
+      if (transactionStarted) {
+        try {
+          await database.rollbackTransaction();
+        } catch (rollbackError) {
+          console.warn('Postpone rollback failed:', rollbackError);
+        }
+      }
+
+      throw error;
+    }
+
+    const contract = await contractService.getById(installment.contract_id);
+    if (contract) {
+      try {
+        await customerService.setCurrentMonthStatus(contract.customer_id, 'postponed');
+      } catch (statusError) {
+        console.warn('Monthly status update failed:', statusError);
+      }
+    }
+
+    notifyDataChanged({ scope: 'installments', action: 'postpone', id, contractId: installment.contract_id });
+  },
+
+  async undoPostpone(id) {
+    const installment = await this.getById(id);
+    if (!installment || installment.status !== 'postponed') {
+      throw new Error('لا يمكن إلغاء التأجيل إلا لقسط مؤجل');
+    }
+
+    const database = await getDatabase();
+    const actionResult = await database.query(
+      `
+        SELECT *
+        FROM installment_postponements
+        WHERE installment_id = ?
+        AND status = 'active'
+        ORDER BY id DESC
+        LIMIT 1
+      `,
+      [id]
+    );
+    const action = actionResult.values?.[0];
+
+    if (!action) {
+      throw new Error('لا يمكن إلغاء هذا التأجيل بأمان لأنه تم قبل إضافة سجل الرجوع');
+    }
+
+    const deferredAmount = roundCurrency(action.postponed_amount);
+    let transactionStarted = false;
+
+    try {
+      await database.beginTransaction();
+      transactionStarted = true;
+
+      if (action.generated_installment_id) {
+        const generatedResult = await database.query(
+          `SELECT * FROM installments WHERE id = ? LIMIT 1`,
+          [action.generated_installment_id]
+        );
+        const generated = generatedResult.values?.[0];
+
+        if (!generated) {
+          throw new Error('لا يمكن إلغاء التأجيل لأن القسط الناتج غير موجود');
+        }
+
+        if (generated.status !== 'pending' || getPaidAmount(generated) > 0) {
+          throw new Error('لا يمكن إلغاء التأجيل لأن القسط الناتج تم دفعه أو تعديله');
+        }
+
+        if (Math.abs(roundCurrency(Number(generated.amount || 0) - deferredAmount)) > 0.009) {
+          throw new Error('لا يمكن إلغاء التأجيل لأن مبلغ القسط الناتج تغير بعد التأجيل');
+        }
+
+        await database.run(`DELETE FROM installments WHERE id = ?`, [generated.id], false);
+      } else if (action.target_installment_id) {
+        const targetResult = await database.query(
+          `SELECT * FROM installments WHERE id = ? LIMIT 1`,
+          [action.target_installment_id]
+        );
+        const target = targetResult.values?.[0];
+
+        if (!target) {
+          throw new Error('لا يمكن إلغاء التأجيل لأن القسط التالي غير موجود');
+        }
+
+        if (target.status !== 'pending' || getPaidAmount(target) > 0) {
+          throw new Error('لا يمكن إلغاء التأجيل لأن القسط التالي تم دفعه أو تعديله');
+        }
+
+        const expectedAmount = roundCurrency(Number(action.target_original_amount || 0) + deferredAmount);
+        if (Math.abs(roundCurrency(Number(target.amount || 0) - expectedAmount)) > 0.009) {
+          throw new Error('لا يمكن إلغاء التأجيل لأن مبلغ القسط التالي تغير بعد التأجيل');
+        }
+
+        await database.run(
+          `UPDATE installments SET amount = ? WHERE id = ?`,
+          [roundCurrency(action.target_original_amount), target.id],
+          false
+        );
+      } else {
+        throw new Error('لا يمكن إلغاء التأجيل لأن سجل التأجيل غير مكتمل');
+      }
+
+      await database.run(
+        `UPDATE installments SET status = 'pending', is_late = 0 WHERE id = ?`,
+        [id],
+        false
+      );
+      await database.run(
+        `UPDATE installment_postponements SET status = 'undone', undone_at = CURRENT_TIMESTAMP WHERE id = ?`,
+        [action.id],
+        false
+      );
+
+      await database.commitTransaction();
+      transactionStarted = false;
+    } catch (error) {
+      if (transactionStarted) {
+        try {
+          await database.rollbackTransaction();
+        } catch (rollbackError) {
+          console.warn('Undo postpone rollback failed:', rollbackError);
+        }
+      }
+
+      throw error;
+    }
+
+    const contract = await contractService.getById(installment.contract_id);
+    if (contract) {
+      try {
+        await customerService.setCurrentMonthStatus(contract.customer_id, 'none');
+      } catch (statusError) {
+        console.warn('Monthly status update failed:', statusError);
+      }
+    }
+
+    notifyDataChanged({ scope: 'installments', action: 'undo-postpone', id, contractId: installment.contract_id });
   },
 
   async undoPay(id) {
@@ -574,7 +1296,13 @@ export const installmentService = {
     if (contract) {
       await database.run(`UPDATE customers SET status = 'active' WHERE id = ?`, [contract.customer_id]);
       console.log(`Customer ${contract.customer_id} and Contract ${contract.id} reactivated after undo payment.`);
+      try {
+        await customerService.setCurrentMonthStatus(contract.customer_id, 'none');
+      } catch (statusError) {
+        console.warn('Monthly status update failed:', statusError);
+      }
     }
+    notifyDataChanged({ scope: 'installments', action: 'undo-pay', id, contractId: installment.contract_id });
   },
 
   async getUpcoming(days = 7) {
@@ -611,6 +1339,67 @@ export const installmentService = {
     `;
     const result = await database.query(sql);
     return result.values || [];
+  },
+
+  async getHomeAlerts(days = 3) {
+    const database = await getDatabase();
+    const overdueThreshold = parseInt(await settingsService.get('overdue_threshold_days'), 10) || 30;
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const todayText = formatLocalDate(today);
+    const horizonText = formatLocalDate(addLocalDays(today, Math.max(1, parseInt(days, 10) || 3)));
+    const debtorCutoffText = formatLocalDate(addLocalDays(today, -overdueThreshold));
+
+    const sql = `
+      SELECT i.*, c.title as contract_title, cu.id as customer_id, cu.name as customer_name, cu.phone as customer_phone, m.name as manager_name
+      FROM installments i
+      JOIN contracts c ON i.contract_id = c.id
+      JOIN customers cu ON c.customer_id = cu.id
+      LEFT JOIN managers m ON cu.manager_id = m.id
+      WHERE i.status = 'pending'
+      AND c.status = 'active'
+      AND (cu.status IS NULL OR cu.status = 'active')
+      AND (cu.is_deleted IS NULL OR cu.is_deleted = 0)
+      AND (cu.is_manually_flagged_as_overdue IS NULL OR cu.is_manually_flagged_as_overdue = 0)
+      AND NOT EXISTS (
+        SELECT 1
+        FROM installments oi
+        JOIN contracts oc ON oi.contract_id = oc.id
+        WHERE oc.customer_id = cu.id
+        AND oc.status = 'active'
+        AND oi.status = 'pending'
+        AND oi.due_date < ?
+      )
+      AND i.due_date <= ?
+      ORDER BY i.due_date ASC, i.id ASC
+    `;
+
+    const result = await database.query(sql, [debtorCutoffText, horizonText]);
+    const rows = result.values || [];
+    const alerts = {
+      late: [],
+      today: [],
+      upcoming: [],
+      totalAmount: 0
+    };
+
+    rows.forEach((item) => {
+      const remaining = Math.max(0, (item.amount || 0) - (item.actual_paid || 0));
+      alerts.totalAmount += remaining || item.amount || 0;
+
+      if (item.due_date < todayText) {
+        alerts.late.push(item);
+      } else if (item.due_date === todayText) {
+        alerts.today.push(item);
+      } else {
+        alerts.upcoming.push(item);
+      }
+    });
+
+    return {
+      ...alerts,
+      total: rows.length
+    };
   }
 };
 
@@ -625,7 +1414,9 @@ export const expenseService = {
       expense.category || 'أخرى', 
       expense.date || new Date().toISOString().split('T')[0]
     ]);
-    return result.changes?.lastId || result.lastId;
+    const id = result.changes?.lastId || result.lastId;
+    notifyDataChanged({ scope: 'expenses', action: 'create', id });
+    return id;
   },
 
   async getAll() {
@@ -650,11 +1441,13 @@ export const expenseService = {
     const data = { ...current, ...expense };
     await database.run(`UPDATE expenses SET description = ?, amount = ?, category = ?, date = ? WHERE id = ?`,
       [data.description, data.amount, data.category, data.date, id]);
+    notifyDataChanged({ scope: 'expenses', action: 'update', id });
   },
 
   async delete(id) {
     const database = await getDatabase();
     await database.run(`DELETE FROM expenses WHERE id = ?`, [id]);
+    notifyDataChanged({ scope: 'expenses', action: 'delete', id });
   },
 
   async getTotal() {
@@ -683,7 +1476,7 @@ export const settingsService = {
   },
 
   async getWhatsAppTemplate() {
-    return await this.get('whatsapp_template') || 'مرحباً [الاسم]، نذكركم بموعد دفع القسط بمبلغ [المبلغ] ريال بتاريخ [التاريخ]. شكراً لتعاونكم.';
+    return await this.get('whatsapp_template') || DEFAULT_WHATSAPP_TEMPLATE;
   },
 
   async isBiometricEnabled() {
@@ -706,13 +1499,13 @@ export const dashboardService = {
       AND (cu.is_deleted IS NULL OR cu.is_deleted = 0)
     `);
     
-    // Only sum payments for installments belonging to 'active' contracts of personal customers
+    // Include partial payments on active contracts.
     const totalPaid = await database.query(`
-      SELECT SUM(i.actual_paid) as total 
+      SELECT SUM(${paidAmountSql('i')}) as total
       FROM installments i
       JOIN contracts c ON i.contract_id = c.id
       JOIN customers cu ON c.customer_id = cu.id
-      WHERE c.status = 'active' AND i.status = 'paid' 
+      WHERE c.status = 'active'
       AND (cu.manager_id IS NULL OR cu.manager_id = 0 OR cu.manager_id = '')
       AND (cu.is_manually_flagged_as_overdue IS NULL OR cu.is_manually_flagged_as_overdue = 0)
       AND (cu.is_deleted IS NULL OR cu.is_deleted = 0)
@@ -748,12 +1541,12 @@ export const dashboardService = {
     `);
     
     const totalPaid = await database.query(`
-      SELECT SUM(i.actual_paid) as total 
+      SELECT SUM(${paidAmountSql('i')}) as total
       FROM installments i
       JOIN contracts c ON i.contract_id = c.id
       JOIN customers cu ON c.customer_id = cu.id
       JOIN managers m ON cu.manager_id = m.id
-      WHERE c.status = 'active' AND i.status = 'paid' 
+      WHERE c.status = 'active'
       AND cu.manager_id IS NOT NULL 
       AND cu.manager_id != 0 
       AND cu.manager_id != ''
@@ -784,7 +1577,9 @@ export const portfolioService = {
       portfolio.capital, 
       portfolio.description || null
     ]);
-    return result.changes?.lastId || result.lastId;
+    const id = result.changes?.lastId || result.lastId;
+    notifyDataChanged({ scope: 'portfolios', action: 'create', id });
+    return id;
   },
 
   async getAll() {
@@ -807,11 +1602,13 @@ export const portfolioService = {
     const data = { ...existing, ...portfolio };
     const sql = `UPDATE portfolios SET name = ?, capital = ?, description = ? WHERE id = ?`;
     await database.run(sql, [data.name, data.capital, data.description, id]);
+    notifyDataChanged({ scope: 'portfolios', action: 'update', id });
   },
 
   async delete(id) {
     const database = await getDatabase();
     await database.run(`DELETE FROM portfolios WHERE id = ?`, [id]);
+    notifyDataChanged({ scope: 'portfolios', action: 'delete', id });
   }
 };
 
@@ -826,7 +1623,9 @@ export const portfolioExpenseService = {
       expense.description || null, 
       expense.date || new Date().toISOString().split('T')[0]
     ]);
-    return result.changes?.lastId || result.lastId;
+    const id = result.changes?.lastId || result.lastId;
+    notifyDataChanged({ scope: 'portfolio_expenses', action: 'create', id, portfolioId: expense.portfolio_id });
+    return id;
   },
 
   async getByPortfolioId(portfolioId) {
@@ -838,6 +1637,7 @@ export const portfolioExpenseService = {
   async delete(id) {
     const database = await getDatabase();
     await database.run(`DELETE FROM portfolio_expenses WHERE id = ?`, [id]);
+    notifyDataChanged({ scope: 'portfolio_expenses', action: 'delete', id });
   },
 
   async getStats(portfolioId) {
@@ -853,7 +1653,9 @@ export const managerService = {
     const database = await getDatabase();
     const sql = `INSERT INTO managers (name, phone) VALUES (?, ?)`;
     const result = await database.run(sql, [manager.name, manager.phone || null]);
-    return result.changes?.lastId || result.lastId;
+    const id = result.changes?.lastId || result.lastId;
+    notifyDataChanged({ scope: 'managers', action: 'create', id });
+    return id;
   },
 
   async getAllWithStats() {
@@ -872,7 +1674,7 @@ export const managerService = {
           AND (cu.is_deleted IS NULL OR cu.is_deleted = 0)
         ) as total_contracts,
         (
-          SELECT COALESCE(SUM(i.actual_paid), 0)
+          SELECT COALESCE(SUM(${paidAmountSql('i')}), 0)
           FROM installments i
           JOIN contracts c2 ON i.contract_id = c2.id
           JOIN customers cu2 ON c2.customer_id = cu2.id
@@ -902,6 +1704,7 @@ export const managerService = {
   async delete(id) {
     const database = await getDatabase();
     await database.run(`DELETE FROM managers WHERE id = ?`, [id]);
+    notifyDataChanged({ scope: 'managers', action: 'delete', id });
   },
 
   async getManagersWithOverdueCount(overdueThreshold = 30) {
@@ -942,7 +1745,7 @@ export const managerService = {
             AND (cu.is_deleted IS NULL OR cu.is_deleted = 0)
           ) as total_contracts,
           (
-            SELECT COALESCE(SUM(i.actual_paid), 0)
+            SELECT COALESCE(SUM(${paidAmountSql('i')}), 0)
             FROM installments i
             JOIN contracts c ON i.contract_id = c.id
             JOIN customers cu ON c.customer_id = cu.id

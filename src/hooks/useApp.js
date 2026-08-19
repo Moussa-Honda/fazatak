@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { dashboardService, initDatabase } from '../services/database';
+import { useLiveRefresh } from './useLiveRefresh';
 
 export const useDatabase = () => {
   const [isReady, setIsReady] = useState(false);
@@ -28,24 +29,20 @@ export const useDatabase = () => {
 };
 
 export const useGreeting = () => {
-  const [greeting, setGreeting] = useState('');
-
-  useEffect(() => {
+  const [greeting] = useState(() => {
     const hour = new Date().getHours();
-    let text = '';
-    
+
     if (hour >= 5 && hour < 12) {
-      text = 'صباح الإنجاز والرزق 🌅';
-    } else if (hour >= 12 && hour < 17) {
-      text = 'مساء العطاء والتوفيق ☀️';
-    } else if (hour >= 17 && hour < 21) {
-      text = 'مساء الخير والبركة 🌇';
-    } else {
-      text = 'تصبح على خير ونجاح 🌙';
+      return 'صباح الإنجاز والرزق 🌅';
     }
-    
-    setGreeting(text);
-  }, []);
+    if (hour >= 12 && hour < 17) {
+      return 'مساء العطاء والتوفيق ☀️';
+    }
+    if (hour >= 17 && hour < 21) {
+      return 'مساء الخير والبركة 🌇';
+    }
+    return 'تصبح على خير ونجاح 🌙';
+  });
 
   return greeting;
 };
@@ -78,13 +75,15 @@ export const useStats = () => {
   useEffect(() => {
     refresh();
     
-    // Auto-refresh every 2 seconds when component is mounted
+    // Keep a light safety refresh; data-change events handle immediate updates.
     const interval = setInterval(() => {
       refresh();
-    }, 2000);
+    }, 15000);
     
     return () => clearInterval(interval);
   }, [refresh]);
+
+  useLiveRefresh(refresh);
 
   return { stats, loading, refresh };
 };
@@ -117,13 +116,15 @@ export const useManagerStats = () => {
   useEffect(() => {
     refresh();
     
-    // Auto-refresh every 2 seconds when component is mounted
+    // Keep a light safety refresh; data-change events handle immediate updates.
     const interval = setInterval(() => {
       refresh();
-    }, 2000);
+    }, 15000);
     
     return () => clearInterval(interval);
   }, [refresh]);
+
+  useLiveRefresh(refresh);
 
   return { stats, loading, refresh };
 };

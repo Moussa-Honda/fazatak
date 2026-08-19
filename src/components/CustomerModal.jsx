@@ -89,7 +89,7 @@ const CustomerModal = ({ isOpen, onClose, onSave, customer = null, managerId = n
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4">
+    <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 modal-safe-area">
       <div className="bg-slate-800 rounded-2xl w-full max-w-md overflow-hidden max-h-[90dvh] flex flex-col">
         <div className={`${themeColor === 'indigo' ? 'bg-indigo-900/50' : 'bg-slate-700'} px-6 py-4 flex justify-between items-center shrink-0`}>
           <h3 className="text-lg font-bold text-white">

@@ -1,11 +1,14 @@
 import { useState, useEffect } from 'react';
 import { contractService, installmentService, customerService, settingsService } from '../services/database';
+import { notificationService } from '../services/notificationService';
 import { toHijriDate } from '../utils/dateUtils';
+import ContractModal from './ContractModal';
 import PaymentModal from './PaymentModal';
 import EarlySettlementModal from './EarlySettlementModal';
 import { Clipboard } from '@capacitor/clipboard';
 import { generatePDF, PDF_MODES } from '../utils/pdfGenerator';
 import { formatForWhatsApp } from '../utils/phoneUtils';
+import { useLiveRefresh } from '../hooks/useLiveRefresh';
 
 // Helper function to round numbers
 const roundAmount = (amount) => {
@@ -13,8 +16,109 @@ const roundAmount = (amount) => {
   return Math.round(amount);
 };
 
+const getInstallmentRemaining = (installment) => {
+  const actualPaid = Number(installment?.actual_paid || 0);
+  const status = String(installment?.status || '').trim().toLowerCase();
+  const paidAmount = status === 'paid' && actualPaid <= 0
+    ? Number(installment?.amount || 0)
+    : actualPaid;
+  return Number(installment?.amount || 0) - paidAmount;
+};
+
+const isInstallmentPaidForDisplay = (installment) => {
+  const status = String(installment?.status || '').trim().toLowerCase();
+  return status === 'paid' || (Number(installment?.actual_paid || 0) > 0 && getInstallmentRemaining(installment) <= 0.009);
+};
+
+const getInstallmentPaidAmount = (installment) => {
+  const status = String(installment?.status || '').trim().toLowerCase();
+  const actualPaid = Number(installment?.actual_paid || 0);
+  if (status === 'paid' && actualPaid <= 0) {
+    return Number(installment?.amount || 0);
+  }
+  return Math.max(0, actualPaid);
+};
+
+const getInstallmentsForDisplay = (items = []) => {
+  const scheduleNumbers = new Map(
+    [...items]
+      .sort((a, b) => {
+        const dateOrder = String(a.due_date || '').localeCompare(String(b.due_date || ''));
+        if (dateOrder !== 0) return dateOrder;
+
+        return Number(a.id || 0) - Number(b.id || 0);
+      })
+      .map((item, index) => [item.id, index + 1])
+  );
+
+  const sortByDueDate = (a, b) => {
+      const dateOrder = String(a.due_date || '').localeCompare(String(b.due_date || ''));
+      if (dateOrder !== 0) return dateOrder;
+
+      return Number(a.id || 0) - Number(b.id || 0);
+  };
+
+  const pending = items.filter(item => !isInstallmentPaidForDisplay(item)).sort(sortByDueDate);
+  const paid = items.filter(item => isInstallmentPaidForDisplay(item)).sort(sortByDueDate);
+
+  return [...pending, ...paid].map((item) => ({
+      ...item,
+      scheduleNumber: scheduleNumbers.get(item.id)
+    }));
+};
+
+const PostponeModal = ({ isOpen, installment, loading, onClose, onConfirm }) => {
+  if (!isOpen || !installment) return null;
+
+  return (
+    <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 modal-safe-area">
+      <div className="bg-slate-800 rounded-2xl w-full max-w-md overflow-hidden border border-slate-700">
+        <div className="bg-slate-700 px-6 py-4 flex justify-between items-center">
+          <div>
+            <h3 className="text-lg font-bold text-white">تأجيل القسط</h3>
+            <p className="text-slate-400 text-sm">{installment.contract_title}</p>
+          </div>
+          <button onClick={onClose} className="text-slate-400 hover:text-white transition-colors">✕</button>
+        </div>
+
+        <div className="p-6 space-y-4">
+          <div className="bg-slate-900/70 border border-slate-700 rounded-xl p-4 text-sm">
+            <div className="flex justify-between mb-2">
+              <span className="text-slate-400">القسط</span>
+              <span className="text-white font-bold">{roundAmount(installment.amount).toLocaleString('en-US')} ر.س</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-slate-400">تاريخ الاستحقاق</span>
+              <span className="text-white">{installment.due_date}</span>
+            </div>
+          </div>
+
+          <button
+            type="button"
+            disabled={loading}
+            onClick={() => onConfirm('end')}
+            className="w-full text-right bg-amber-500/10 border border-amber-500/40 text-amber-200 rounded-xl p-4 hover:bg-amber-500/20 transition-colors disabled:opacity-50"
+          >
+            <span className="block font-bold text-white mb-1">تأجيل لنهاية الجدول</span>
+            <span className="text-xs text-amber-200/80">يخرج هذا القسط من المتأخرات ويتم إنشاء قسط جديد بعد آخر قسط.</span>
+          </button>
+
+          <button
+            type="button"
+            disabled={loading}
+            onClick={() => onConfirm('next')}
+            className="w-full text-right bg-blue-500/10 border border-blue-500/40 text-blue-200 rounded-xl p-4 hover:bg-blue-500/20 transition-colors disabled:opacity-50"
+          >
+            <span className="block font-bold text-white mb-1">تأجيل للشهر التالي</span>
+            <span className="text-xs text-blue-200/80">يخرج هذا القسط من المتأخرات ويضاف مبلغه إلى القسط القادم.</span>
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
 const ContractList = ({ customerId, isReadOnly, onRenewalRequest, themeColor = 'blue' }) => {
-  const themeBg = themeColor === 'indigo' ? 'bg-indigo-600' : 'bg-blue-600';
   const themeText = themeColor === 'indigo' ? 'text-indigo-400' : 'text-blue-400';
   const themeBorder = themeColor === 'indigo' ? 'border-indigo-500/30' : 'border-blue-500/30';
   const themeLightBg = themeColor === 'indigo' ? 'bg-indigo-500/20' : 'bg-blue-500/20';
@@ -23,6 +127,11 @@ const ContractList = ({ customerId, isReadOnly, onRenewalRequest, themeColor = '
   const [installments, setInstallments] = useState({});
   const [showPaymentModal, setShowPaymentModal] = useState(false);
   const [selectedInstallment, setSelectedInstallment] = useState(null);
+  const [paymentMode, setPaymentMode] = useState('regular');
+  const [showPostponeModal, setShowPostponeModal] = useState(false);
+  const [postponeLoading, setPostponeLoading] = useState(false);
+  const [undoPostponeLoading, setUndoPostponeLoading] = useState(null);
+  const [selectedPostponeInstallment, setSelectedPostponeInstallment] = useState(null);
   const [loading, setLoading] = useState(true);
   const [customer, setCustomer] = useState(null);
   const [quickPaymentMode, setQuickPaymentMode] = useState(false);
@@ -31,6 +140,8 @@ const ContractList = ({ customerId, isReadOnly, onRenewalRequest, themeColor = '
   const [privacyMode, setPrivacyMode] = useState(false);
   const [autoAppendIban, setAutoAppendIban] = useState(false);
   const [ibanNumber, setIbanNumber] = useState('');
+  const [showContractModal, setShowContractModal] = useState(false);
+  const [editingContract, setEditingContract] = useState(null);
   const [showEarlySettlement, setShowEarlySettlement] = useState(false);
   const [selectedContract, setSelectedContract] = useState(null);
   const [pdfLoading, setPdfLoading] = useState(null); // tracks contract.id being exported
@@ -66,20 +177,49 @@ const ContractList = ({ customerId, isReadOnly, onRenewalRequest, themeColor = '
     setIbanNumber(iban || '');
   };
 
+  const refreshContractInstallments = async (contractId) => {
+    if (!contractId) return;
+
+    const data = await installmentService.getByContractId(contractId);
+    setInstallments(prev => ({ ...prev, [contractId]: data }));
+  };
+
+  useLiveRefresh(() => {
+    if (!customerId) return;
+    loadData();
+    loadSettings();
+    if (expandedContract) {
+      refreshContractInstallments(expandedContract);
+    }
+  }, Boolean(customerId));
+
   const toggleContract = async (contractId) => {
     if (expandedContract === contractId) {
       setExpandedContract(null);
     } else {
       setExpandedContract(contractId);
       if (!installments[contractId]) {
-        const data = await installmentService.getByContractId(contractId);
-        setInstallments(prev => ({ ...prev, [contractId]: data }));
+        await refreshContractInstallments(contractId);
       }
     }
   };
 
   const handlePay = (installment, contract) => {
     if (isReadOnly) return onRenewalRequest?.();
+    setPaymentMode('regular');
+    setSelectedInstallment({
+      ...installment,
+      contract_id: contract.id,
+      contract_title: contract.title,
+      customer_name: customer?.name,
+      customer_phone: customer?.phone
+    });
+    setShowPaymentModal(true);
+  };
+
+  const handleExtraPayment = (installment, contract) => {
+    if (isReadOnly) return onRenewalRequest?.();
+    setPaymentMode('extra');
     setSelectedInstallment({
       ...installment,
       contract_id: contract.id,
@@ -100,11 +240,9 @@ const ContractList = ({ customerId, isReadOnly, onRenewalRequest, themeColor = '
     if (confirmed) {
       try {
         await installmentService.pay(installment.id, remaining, null, 0);
-        loadData();
-        if (expandedContract) {
-          const data = await installmentService.getByContractId(expandedContract);
-          setInstallments(prev => ({ ...prev, [expandedContract]: data }));
-        }
+        notificationService.refreshSchedule().catch(error => console.error('Notification refresh error:', error));
+        await loadData();
+        await refreshContractInstallments(contract.id);
       } catch (error) {
         console.error('Quick payment error:', error);
         alert('حدث خطأ أثناء تسجيل الدفع');
@@ -137,16 +275,55 @@ const ContractList = ({ customerId, isReadOnly, onRenewalRequest, themeColor = '
     }
   };
 
-  const handlePostpone = async (installmentId, contractId) => {
+  const handleOpenPostpone = (installment, contract) => {
     if (isReadOnly) return onRenewalRequest?.();
-    const confirmed = window.confirm('هل تريد تأجيل هذا القسط لشهر قادم؟ سيتم دفع الأقساط اللاحقة أيضاً شهراً.');
+    setSelectedPostponeInstallment({
+      ...installment,
+      contract_id: contract.id,
+      contract_title: contract.title
+    });
+    setShowPostponeModal(true);
+  };
+
+  const handlePostpone = async (mode) => {
+    if (!selectedPostponeInstallment) return;
+
+    setPostponeLoading(true);
+    const contractId = selectedPostponeInstallment.contract_id;
+
+    try {
+      await installmentService.postpone(selectedPostponeInstallment.id, mode);
+      notificationService.refreshSchedule().catch(error => console.error('Notification refresh error:', error));
+      await refreshContractInstallments(contractId);
+      await loadData();
+      setShowPostponeModal(false);
+      setSelectedPostponeInstallment(null);
+    } catch (error) {
+      console.error('Postpone error:', error);
+      alert('حدث خطأ أثناء تأجيل القسط');
+    } finally {
+      setPostponeLoading(false);
+    }
+  };
+
+  const handleUndoPostpone = async (installment, contract) => {
+    if (isReadOnly) return onRenewalRequest?.();
+
+    const confirmed = window.confirm('هل تريد إلغاء تأجيل هذا القسط وإرجاعه للحالة المعلقة؟');
     if (!confirmed) return;
 
-    await installmentService.postpone(installmentId);
-    
-    const data = await installmentService.getByContractId(contractId);
-    setInstallments(prev => ({ ...prev, [contractId]: data }));
-    loadData();
+    setUndoPostponeLoading(installment.id);
+    try {
+      await installmentService.undoPostpone(installment.id);
+      notificationService.refreshSchedule().catch(error => console.error('Notification refresh error:', error));
+      await refreshContractInstallments(contract.id);
+      await loadData();
+    } catch (error) {
+      console.error('Undo postpone error:', error);
+      alert(error?.message || 'حدث خطأ أثناء إلغاء التأجيل');
+    } finally {
+      setUndoPostponeLoading(null);
+    }
   };
 
   const sendWhatsApp = async (installment, toGuarantor = false) => {
@@ -155,7 +332,8 @@ const ContractList = ({ customerId, isReadOnly, onRenewalRequest, themeColor = '
     let message = template
       .replace(/\[الاسم\]/g, customer?.name || '')
       .replace(/\[المبلغ\]/g, roundAmount(installment.amount).toLocaleString('en-US') || '')
-      .replace(/\[التاريخ\]/g, installment.due_date || '');
+      .replace(/\[التاريخ\]/g, installment.due_date || '')
+      .replace(/\[العقد\]/g, contract?.title || '');
     
     if (autoAppendIban && ibanNumber) {
       message += `\nللسداد، الآيبان: ${ibanNumber}`;
@@ -223,14 +401,6 @@ const ContractList = ({ customerId, isReadOnly, onRenewalRequest, themeColor = '
     } catch (error) {
       console.error('Clipboard error:', error);
       alert('تعذر النسخ');
-    }
-  };
-
-  const getStatusColor = (status) => {
-    switch (status) {
-      case 'paid': return 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30';
-      case 'postponed': return 'bg-amber-500/20 text-amber-400 border-amber-500/30';
-      default: return 'bg-rose-500/20 text-rose-400 border-rose-500/30';
     }
   };
 
@@ -361,9 +531,9 @@ const ContractList = ({ customerId, isReadOnly, onRenewalRequest, themeColor = '
                     <button
                       onClick={(e) => {
                         e.stopPropagation();
-                        if (window.confirm(`هل تريد تعديل عقد "${contract.title}"؟`)) {
-                          alert('سيتم فتح نموذج التعديل...');
-                        }
+                        if (isReadOnly) return onRenewalRequest?.();
+                        setEditingContract(contract);
+                        setShowContractModal(true);
                       }}
                       className="px-3 py-1.5 bg-blue-600/20 border border-blue-500/50 text-blue-400 rounded-lg text-xs font-medium hover:bg-blue-600/30 transition-colors"
                     >
@@ -375,7 +545,13 @@ const ContractList = ({ customerId, isReadOnly, onRenewalRequest, themeColor = '
                         e.stopPropagation();
                         if (window.confirm(`⚠️ هل أنت متأكد من حذف عقد "${contract.title}"؟\n\nسيتم حذف العقد وجميع أقساطه نهائياً!`)) {
                           contractService.delete(contract.id).then(() => {
+                            notificationService.refreshSchedule().catch(error => console.error('Notification refresh error:', error));
                             loadData();
+                            setInstallments(prev => {
+                              const next = { ...prev };
+                              delete next[contract.id];
+                              return next;
+                            });
                             alert('✅ تم حذف العقد بنجاح');
                           }).catch(err => {
                             console.error('Error deleting contract:', err);
@@ -420,32 +596,38 @@ const ContractList = ({ customerId, isReadOnly, onRenewalRequest, themeColor = '
                   <div className="p-4">
                     <h5 className="text-sm font-bold text-slate-400 mb-3">جدول الأقساط</h5>
                     
-                    <div className="space-y-2">
-                      {installments[contract.id].map((inst, index) => (
+                    <div className="flex flex-col gap-2">
+                      {getInstallmentsForDisplay(installments[contract.id]).map((inst) => {
+                        const paidAmount = getInstallmentPaidAmount(inst);
+                        const remainingAmount = Math.max(0, getInstallmentRemaining(inst));
+                        const isPaid = isInstallmentPaidForDisplay(inst);
+                        const isPartial = !isPaid && paidAmount > 0;
+                        const primaryAmount = isPaid ? paidAmount : remainingAmount;
+
+                        return (
                         <div 
                           key={inst.id}
-                          className="flex items-center justify-between bg-slate-900 rounded-lg p-3"
+                          className="flex flex-col sm:flex-row sm:items-center sm:justify-between bg-slate-900 rounded-lg p-3 gap-3"
+                          style={{ order: isInstallmentPaidForDisplay(inst) ? 1 : 0 }}
                         >
-                          <div className="flex items-center gap-3">
-                            <span className="text-slate-500 text-sm w-6">#{index + 1}</span>
+                          <div className="flex items-start gap-3 min-w-0">
+                            <span className="text-slate-500 text-xs w-8 pt-1">#{inst.scheduleNumber}</span>
                             <span className={`w-2 h-2 rounded-full ${
                               inst.status === 'paid' ? 'bg-emerald-500' : 
                               inst.status === 'postponed' ? 'bg-amber-500' : 'bg-rose-500'
-                            }`} />
+                            } mt-2 shrink-0`} />
                             
-                            <div>
-                              <p className="text-white font-medium">
-                                {inst.status === 'paid' && inst.actual_paid > 0
-                                  ? formatAmount(inst.actual_paid)
-                                  : formatAmount(inst.amount)}
+                            <div className="min-w-0">
+                              <p className={`font-black leading-6 ${isPaid ? 'text-emerald-300' : isPartial ? 'text-rose-300' : 'text-white'}`}>
+                                {formatAmount(primaryAmount)}
                               </p>
-                              {inst.status === 'pending' && inst.actual_paid > 0 && (
-                                <p className="text-emerald-400 text-xs">
-                                  مدفوع: {formatAmount(inst.actual_paid)} 
-                                  <span className="text-rose-400"> | متبقي: {formatAmount(inst.amount - inst.actual_paid)}</span>
+                              {isPartial && (
+                                <p className="text-emerald-400 text-[11px] leading-5">
+                                  مدفوع: {formatAmount(paidAmount)}
+                                  <span className="text-slate-500"> | أصل القسط: {formatAmount(inst.amount)}</span>
                                 </p>
                               )}
-                              {inst.status === 'paid' && inst.actual_paid > 0 && inst.actual_paid !== inst.amount && (
+                              {isPaid && paidAmount > 0 && paidAmount !== inst.amount && (
                                 <p className="text-amber-400 text-xs">
                                   القسط الأصلي: {formatAmount(inst.amount)}
                                 </p>
@@ -459,7 +641,7 @@ const ContractList = ({ customerId, isReadOnly, onRenewalRequest, themeColor = '
                             </div>
                           </div>
 
-                          <div className="flex items-center gap-4">
+                          <div className="flex items-center justify-between sm:justify-end gap-2 flex-wrap">
                             {inst.status === 'paid' && (
                               <div className="flex gap-2">
                                 <button
@@ -467,7 +649,7 @@ const ContractList = ({ customerId, isReadOnly, onRenewalRequest, themeColor = '
                                     e.stopPropagation();
                                     handleInstallmentReceipt(inst, contract);
                                   }}
-                                  className="w-10 h-10 flex items-center justify-center bg-white/5 border border-white/10 text-slate-400 rounded-2xl hover:bg-white/10 transition-colors"
+                                  className="h-9 min-w-9 px-3 flex items-center justify-center bg-white/5 border border-white/10 text-slate-400 rounded-xl hover:bg-white/10 transition-colors"
                                   title="إيصال الدفع"
                                 >
                                   🧾
@@ -480,12 +662,12 @@ const ContractList = ({ customerId, isReadOnly, onRenewalRequest, themeColor = '
                                     const confirmed = window.confirm('هل تريد إلغاء عملية السداد لهذا القسط وإعادته للحالة المعلقة؟');
                                     if (confirmed) {
                                       await installmentService.undoPay(inst.id);
-                                      loadData();
-                                      const data = await installmentService.getByContractId(contract.id);
-                                      setInstallments(prev => ({ ...prev, [contract.id]: data }));
+                                      notificationService.refreshSchedule().catch(error => console.error('Notification refresh error:', error));
+                                      await loadData();
+                                      await refreshContractInstallments(contract.id);
                                     }
                                   }}
-                                  className="w-10 h-10 flex items-center justify-center bg-rose-500/5 border border-rose-500/20 text-rose-500/70 rounded-2xl hover:bg-rose-500/10 transition-colors"
+                                  className="h-9 min-w-9 px-3 flex items-center justify-center bg-rose-500/5 border border-rose-500/20 text-rose-500/70 rounded-xl hover:bg-rose-500/10 transition-colors"
                                   title="إلغاء السداد"
                                 >
                                   ↩️
@@ -494,16 +676,16 @@ const ContractList = ({ customerId, isReadOnly, onRenewalRequest, themeColor = '
                             )}
 
                             {inst.status === 'pending' && (
-                              <div className="flex items-center gap-3">
+                              <div className="flex items-center justify-end gap-2 flex-wrap">
                                 <button
                                   onClick={(e) => {
                                     e.stopPropagation();
                                     sendWhatsApp(inst);
                                   }}
-                                  className="w-11 h-11 flex items-center justify-center bg-emerald-500/10 border border-emerald-500/20 text-emerald-500 rounded-2xl hover:bg-emerald-500/20 transition-all active:scale-95"
+                                  className="h-9 min-w-9 px-3 flex items-center justify-center bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 rounded-xl hover:bg-emerald-500/20 transition-all active:scale-95"
                                   title="إرسال تذكير واتساب"
                                 >
-                                  <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
+                                  <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
                                     <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"/>
                                   </svg>
                                 </button>
@@ -518,11 +700,47 @@ const ContractList = ({ customerId, isReadOnly, onRenewalRequest, themeColor = '
                                   onMouseLeave={handleMouseUp}
                                   onTouchStart={() => handleMouseDown(inst, contract)}
                                   onTouchEnd={handleMouseUp}
-                                  className="px-8 py-3 bg-emerald-600 text-white rounded-2xl text-sm font-black hover:bg-emerald-500 transition-all shadow-xl shadow-emerald-600/20 active:scale-95"
+                                  className="h-9 px-3 bg-emerald-600 text-white rounded-xl text-xs font-black hover:bg-emerald-500 transition-all shadow-lg shadow-emerald-600/15 active:scale-95"
                                 >
-                                  {quickPaymentMode ? 'سداد سريع ⚡' : 'تسجيل سداد'}
+                                  {quickPaymentMode ? 'سريع' : 'سداد'}
+                                </button>
+
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleExtraPayment(inst, contract);
+                                  }}
+                                  className="h-9 px-3 bg-blue-600/15 border border-blue-500/35 text-blue-300 rounded-xl text-xs font-black hover:bg-blue-600/25 transition-all active:scale-95"
+                                  title="المبلغ الإضافي"
+                                >
+                                  زائد
+                                </button>
+
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleOpenPostpone(inst, contract);
+                                  }}
+                                  className="h-9 px-3 bg-amber-600/15 border border-amber-500/35 text-amber-300 rounded-xl text-xs font-black hover:bg-amber-600/25 transition-all active:scale-95"
+                                  title="تأجيل القسط"
+                                >
+                                  تأجيل
                                 </button>
                               </div>
+                            )}
+
+                            {inst.status === 'postponed' && (
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleUndoPostpone(inst, contract);
+                                }}
+                                disabled={undoPostponeLoading === inst.id}
+                                className="h-9 px-3 bg-amber-600/15 border border-amber-500/35 text-amber-200 rounded-xl text-xs font-black hover:bg-amber-600/25 transition-all active:scale-95 disabled:opacity-50"
+                                title="إلغاء تأجيل القسط"
+                              >
+                                {undoPostponeLoading === inst.id ? 'جارٍ...' : 'إلغاء التأجيل'}
+                              </button>
                             )}
 
                             <div className="flex flex-col items-center gap-1">
@@ -536,7 +754,8 @@ const ContractList = ({ customerId, isReadOnly, onRenewalRequest, themeColor = '
                             </div>
                           </div>
                         </div>
-                      ))}
+                        );
+                      })}
                     </div>
                   </div>
                 </div>
@@ -551,16 +770,47 @@ const ContractList = ({ customerId, isReadOnly, onRenewalRequest, themeColor = '
         onClose={() => {
           setShowPaymentModal(false);
           setSelectedInstallment(null);
+          setPaymentMode('regular');
         }}
         onSave={() => {
           loadData();
           if (expandedContract) {
-            installmentService.getByContractId(expandedContract).then(data => {
-              setInstallments(prev => ({ ...prev, [expandedContract]: data }));
-            });
+            refreshContractInstallments(expandedContract);
           }
         }}
         installment={selectedInstallment}
+        themeColor={themeColor}
+        mode={paymentMode}
+      />
+
+      <PostponeModal
+        isOpen={showPostponeModal}
+        installment={selectedPostponeInstallment}
+        loading={postponeLoading}
+        onClose={() => {
+          if (postponeLoading) return;
+          setShowPostponeModal(false);
+          setSelectedPostponeInstallment(null);
+        }}
+        onConfirm={handlePostpone}
+      />
+
+      <ContractModal
+        isOpen={showContractModal}
+        onClose={() => {
+          setShowContractModal(false);
+          setEditingContract(null);
+        }}
+        onSave={() => {
+          loadData();
+          if (editingContract?.id) {
+            refreshContractInstallments(editingContract.id);
+          }
+        }}
+        customerId={customerId}
+        customerName={customer?.name || ''}
+        isBlacklisted={customer?.is_blacklisted}
+        contract={editingContract}
         themeColor={themeColor}
       />
 
@@ -573,9 +823,7 @@ const ContractList = ({ customerId, isReadOnly, onRenewalRequest, themeColor = '
         onSave={() => {
           loadData();
           if (expandedContract) {
-            installmentService.getByContractId(expandedContract).then(data => {
-              setInstallments(prev => ({ ...prev, [expandedContract]: data }));
-            });
+            refreshContractInstallments(expandedContract);
           }
         }}
         contract={selectedContract}

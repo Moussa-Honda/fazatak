@@ -45,7 +45,7 @@ const ManagerModal = ({ isOpen, onClose, onSave, manager = null }) => {
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-[100] p-4">
+    <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-[100] modal-safe-area">
       <div className="bg-slate-800 rounded-3xl w-full max-w-md overflow-hidden shadow-2xl border border-slate-700">
         <div className="bg-slate-700/50 px-6 py-4 flex justify-between items-center border-b border-slate-600">
           <h3 className="text-xl font-black text-white">

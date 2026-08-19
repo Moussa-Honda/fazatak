@@ -33,7 +33,19 @@ yarn-error.log*
 # Build outputs
 dist/
 build/
+ios/build/
+*.ipa
+*.xcarchive
 *.log
+
+# Local Apple signing material (never commit these files)
+*.p12
+*.mobileprovision
+ios/ExportOptions.plist
+
+# Locally prepared transfer archives
+ios-*-ready-*.zip
+ios-full-*-ready-*.zip
 
 # Environment files
 .env
@@ -58,4 +70,3 @@ Thumbs.db
 # Sensitive files (auto-detected)
 dist
 node_modules
-

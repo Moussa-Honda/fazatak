@@ -17,15 +17,10 @@ export const licenseService = {
   },
 
   /**
-   * Attempts to activate the app with the provided code
-   */
+  * Attempts to activate the app with the provided code
+  */
   async activateLicense(code) {
-    try {
-      const result = await License.activateLicense({ code });
-      return result;
-    } catch (err) {
-      throw err;
-    }
+    return License.activateLicense({ code });
   },
 
   /**
@@ -38,7 +33,7 @@ export const licenseService = {
     } catch (err) {
       // Return a specific error code if expired
       if (err.message && err.message.includes('ERR_EXPIRED')) {
-        throw new Error('ERR_EXPIRED');
+        throw new Error('ERR_EXPIRED', { cause: err });
       }
       return { isValid: false, error: err.message };
     }

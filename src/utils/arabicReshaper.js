@@ -130,7 +130,7 @@ export function ar(text) {
       .map(word => reshapeWord(word).split('').reverse().join(''))
       .reverse()
       .join(' ');
-  } catch (_) {
+  } catch {
     return String(text);
   }
 }

@@ -1,4 +1,7 @@
-@import url('https://fonts.googleapis.com/css2?family=Tajawal:wght@400;500;700;800&display=swap');
+@import '@fontsource/tajawal/400.css';
+@import '@fontsource/tajawal/500.css';
+@import '@fontsource/tajawal/700.css';
+@import '@fontsource/tajawal/800.css';
 
 @tailwind base;
 @tailwind components;
@@ -114,6 +117,14 @@ input:focus, textarea:focus, select:focus {
 /* Bottom navigation safe area padding */
 .pb-safe {
   padding-bottom: env(safe-area-inset-bottom);
+}
+
+/* Keep native iOS modal content clear of the notch and home indicator. */
+.modal-safe-area {
+  padding-top: calc(env(safe-area-inset-top, 0px) + 1rem);
+  padding-right: calc(env(safe-area-inset-right, 0px) + 1rem);
+  padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 1rem);
+  padding-left: calc(env(safe-area-inset-left, 0px) + 1rem);
 }
 
 /* Improved button visibility */

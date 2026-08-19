@@ -1,0 +1,6 @@
+*.sh text eol=lf
+*.swift text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+*.plist text eol=lf
+*.xcprivacy text eol=lf

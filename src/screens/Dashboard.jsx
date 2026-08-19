@@ -1,5 +1,6 @@
-import { useState, useEffect } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useGreeting, useManagerStats } from '../hooks/useApp';
+import { useLiveRefresh } from '../hooks/useLiveRefresh';
 import CustomerList from '../components/CustomerList';
 import ContractList from '../components/ContractList';
 import Settings from '../components/Settings';
@@ -8,16 +9,236 @@ import CustodyList from '../components/CustodyList';
 import CustodyDetails from '../components/CustodyDetails';
 import ManagerList from '../components/ManagerList';
 import { generatePDFStatement } from '../utils/pdfGenerator';
-import { contractService, managerService, customerService } from '../services/database';
+import { contractService, customerService, installmentService, settingsService } from '../services/database';
+import { notificationService } from '../services/notificationService';
+import { formatForWhatsApp } from '../utils/phoneUtils';
+
+const SUPPORT_PHONE_DISPLAY = '+966556854162';
+const SUPPORT_WHATSAPP_PHONE = '966556854162';
+
+const ALERT_META = {
+  today: {
+    title: 'الأقساط المستحقة اليوم',
+    empty: 'لا توجد أقساط مستحقة اليوم.',
+    badge: 'bg-amber-500/15 text-amber-300 border-amber-500/40'
+  },
+  late: {
+    title: 'الأقساط المتأخرة حديثاً',
+    empty: 'لا توجد أقساط متأخرة حديثاً خارج قسم المتعثرين.',
+    badge: 'bg-rose-500/15 text-rose-300 border-rose-500/40'
+  },
+  upcoming: {
+    title: 'الأقساط قريبة الاستحقاق',
+    empty: 'لا توجد أقساط قريبة خلال الأيام القادمة.',
+    badge: 'bg-sky-500/15 text-sky-300 border-sky-500/40'
+  }
+};
+
+const getAlertAmount = (item) => {
+  const remaining = Number(item?.amount || 0) - Number(item?.actual_paid || 0);
+  return Math.round(Math.max(0, remaining) || Number(item?.amount || 0));
+};
+
+const HomeAlertsPanel = ({ alerts, loading, onSelectAlert }) => {
+  const total = alerts?.total || 0;
+  const cards = [
+    {
+      key: 'today',
+      title: 'مستحق اليوم',
+      count: alerts?.today?.length || 0,
+      detail: 'أقساط تحتاج متابعة الآن',
+      color: 'border-amber-500/40 bg-amber-500/10 text-amber-300',
+      dot: 'bg-amber-400',
+      onClick: () => onSelectAlert('today')
+    },
+    {
+      key: 'late',
+      title: 'متأخر حديثاً',
+      count: alerts?.late?.length || 0,
+      detail: 'غير موجودة في قسم المتعثرين',
+      color: 'border-rose-500/40 bg-rose-500/10 text-rose-300',
+      dot: 'bg-rose-400',
+      onClick: () => onSelectAlert('late')
+    },
+    {
+      key: 'upcoming',
+      title: 'قريب الاستحقاق',
+      count: alerts?.upcoming?.length || 0,
+      detail: 'خلال الأيام القادمة',
+      color: 'border-sky-500/40 bg-sky-500/10 text-sky-300',
+      dot: 'bg-sky-400',
+      onClick: () => onSelectAlert('upcoming')
+    }
+  ];
+
+  if (loading) {
+    return (
+      <div className="bg-slate-800/50 border border-slate-700/60 rounded-2xl p-4">
+        <div className="h-4 w-32 bg-slate-700 rounded animate-pulse mb-3" />
+        <div className="grid grid-cols-3 gap-2">
+          {[1, 2, 3].map(item => <div key={item} className="h-20 bg-slate-900/60 rounded-xl animate-pulse" />)}
+        </div>
+      </div>
+    );
+  }
+
+  if (total === 0) {
+    return (
+      <div className="bg-emerald-500/10 border border-emerald-500/30 rounded-2xl p-4 flex items-center justify-between gap-3">
+        <div>
+          <h3 className="text-sm font-bold text-emerald-300">كل الأقساط هادئة اليوم</h3>
+          <p className="text-xs text-emerald-300/70 mt-1">لا توجد أقساط قريبة أو مستحقة أو متأخرة خارج قسم المتعثرين.</p>
+        </div>
+        <span className="w-3 h-3 rounded-full bg-emerald-400 shadow-[0_0_14px] shadow-emerald-400/60" />
+      </div>
+    );
+  }
+
+  return (
+    <div className="bg-slate-800/50 border border-slate-700/60 rounded-2xl p-4">
+      <div className="flex items-center justify-between mb-3">
+        <div>
+          <h3 className="text-sm font-bold text-white">تنبيهات الأقساط</h3>
+          <p className="text-xs text-slate-400 mt-0.5">تظهر بدون عملاء قسم المتعثرين</p>
+        </div>
+        <div className="text-left">
+          <p className="text-xl font-black text-white">{total}</p>
+          <p className="text-[10px] text-slate-500">تنبيه</p>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-3 gap-2">
+        {cards.map(card => (
+          <button
+            key={card.key}
+            type="button"
+            onClick={card.onClick}
+            disabled={card.count === 0}
+            className={`rounded-xl border p-3 text-right transition-transform active:scale-95 disabled:opacity-45 disabled:active:scale-100 ${card.color}`}
+          >
+            <div className="flex items-center justify-between mb-2">
+              <span className={`w-2.5 h-2.5 rounded-full ${card.dot}`} />
+              <span className="text-xl font-black">{card.count}</span>
+            </div>
+            <p className="text-xs font-bold text-white">{card.title}</p>
+            <p className="text-[10px] opacity-75 mt-1 leading-4">{card.detail}</p>
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+};
+
+const AlertDetailsModal = ({ type, items, onClose, onOpenCustomer, onSendWhatsApp }) => {
+  const meta = ALERT_META[type] || ALERT_META.today;
+
+  return (
+    <div className="fixed inset-0 z-[9990] flex items-end sm:items-center justify-center modal-safe-area">
+      <div className="absolute inset-0 bg-black/75 backdrop-blur-sm" onClick={onClose} />
+      <div className="relative w-full max-w-lg max-h-[86vh] bg-slate-900 border border-slate-700 shadow-2xl rounded-t-2xl sm:rounded-2xl overflow-hidden">
+        <div className="p-4 border-b border-slate-700 flex items-center justify-between gap-3">
+          <div>
+            <h3 className="text-white text-lg font-bold">{meta.title}</h3>
+            <p className="text-slate-400 text-xs mt-1">{items.length} تنبيه</p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="w-10 h-10 rounded-xl bg-slate-800 text-slate-300 hover:bg-slate-700 transition-colors"
+          >
+            X
+          </button>
+        </div>
+
+        <div className="p-4 space-y-3 overflow-y-auto custom-scrollbar max-h-[68vh]">
+          {items.length === 0 ? (
+            <div className="bg-slate-800/70 border border-slate-700 rounded-xl p-4 text-center text-slate-400 text-sm">
+              {meta.empty}
+            </div>
+          ) : items.map((item) => (
+            <div key={item.id} className="bg-slate-800/80 border border-slate-700 rounded-xl p-4 space-y-3">
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <h4 className="text-white font-bold truncate">{item.customer_name || 'عميل'}</h4>
+                  <p className="text-slate-400 text-xs mt-1 truncate">{item.contract_title || 'عقد'}</p>
+                </div>
+                <span className={`shrink-0 text-[11px] font-bold border rounded-full px-2 py-1 ${meta.badge}`}>
+                  {getAlertAmount(item).toLocaleString('en-US')} ر.س
+                </span>
+              </div>
+
+              <div className="grid grid-cols-2 gap-2 text-xs">
+                <div className="bg-slate-900/60 rounded-lg p-2">
+                  <p className="text-slate-500">تاريخ الاستحقاق</p>
+                  <p className="text-slate-200 font-bold mt-1">{item.due_date || '-'}</p>
+                </div>
+                <div className="bg-slate-900/60 rounded-lg p-2">
+                  <p className="text-slate-500">المسؤول</p>
+                  <p className="text-slate-200 font-bold mt-1 truncate">{item.manager_name || 'بدون'}</p>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={() => onOpenCustomer(item)}
+                  className="bg-blue-600/20 border border-blue-500/40 text-blue-300 py-2.5 rounded-xl text-xs font-bold hover:bg-blue-600/30 transition-colors"
+                >
+                  فتح العميل
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onSendWhatsApp(item)}
+                  className="bg-emerald-600/20 border border-emerald-500/40 text-emerald-300 py-2.5 rounded-xl text-xs font-bold hover:bg-emerald-600/30 transition-colors"
+                >
+                  واتساب
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+};
 
 const Dashboard = ({ isExpired, expiry, onReActivate }) => {
   const greeting = useGreeting();
-  const { stats, loading } = useManagerStats();
+  const { stats } = useManagerStats();
   const [activeTab, setActiveTab] = useState('dashboard');
   const [selectedCustomer, setSelectedCustomer] = useState(null);
   const [selectedCustody, setSelectedCustody] = useState(null);
   const [selectedManager, setSelectedManager] = useState(null);
   const [showRenewal, setShowRenewal] = useState(false);
+  const [homeAlerts, setHomeAlerts] = useState({ late: [], today: [], upcoming: [], total: 0, totalAmount: 0 });
+  const [homeAlertsLoading, setHomeAlertsLoading] = useState(true);
+  const [selectedAlertType, setSelectedAlertType] = useState(null);
+
+  const loadHomeAlerts = useCallback(async () => {
+    try {
+      setHomeAlertsLoading(true);
+      const data = await installmentService.getHomeAlerts(3);
+      setHomeAlerts(data);
+    } catch (error) {
+      console.error('Home alerts error:', error);
+    } finally {
+      setHomeAlertsLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadHomeAlerts();
+    const interval = setInterval(loadHomeAlerts, 30000);
+    return () => clearInterval(interval);
+  }, [loadHomeAlerts]);
+
+  useLiveRefresh(loadHomeAlerts);
+
+  useEffect(() => {
+    if (activeTab === 'dashboard') {
+      loadHomeAlerts();
+    }
+  }, [activeTab, loadHomeAlerts]);
 
   const getRemainingDays = () => {
     if (!expiry) return null;
@@ -30,6 +251,52 @@ const Dashboard = ({ isExpired, expiry, onReActivate }) => {
   };
 
   const remainingText = getRemainingDays();
+  const selectedAlertItems = selectedAlertType ? (homeAlerts?.[selectedAlertType] || []) : [];
+
+  const handleSupportWhatsApp = () => {
+    const message = 'السلام عليكم، أريد تجديد اشتراك تطبيق فزتك.';
+    window.open(`https://wa.me/${SUPPORT_WHATSAPP_PHONE}?text=${encodeURIComponent(message)}`, '_blank');
+  };
+
+  const handleOpenAlertCustomer = async (item) => {
+    try {
+      const customer = await customerService.getById(item.customer_id);
+      if (!customer) {
+        alert('تعذر فتح العميل');
+        return;
+      }
+
+      setSelectedAlertType(null);
+      setSelectedManager(null);
+      setSelectedCustomer(customer);
+      setActiveTab('managers');
+    } catch (error) {
+      console.error('Open alert customer error:', error);
+      alert('تعذر فتح العميل');
+    }
+  };
+
+  const handleAlertWhatsApp = async (item) => {
+    const phone = formatForWhatsApp(item.customer_phone);
+    if (!phone) {
+      alert('لا يوجد رقم جوال لهذا العميل');
+      return;
+    }
+
+    try {
+      const template = await settingsService.getWhatsAppTemplate();
+      const message = template
+        .replace(/\[الاسم\]/g, item.customer_name || '')
+        .replace(/\[المبلغ\]/g, getAlertAmount(item).toLocaleString('en-US'))
+        .replace(/\[التاريخ\]/g, item.due_date || '')
+        .replace(/\[العقد\]/g, item.contract_title || '');
+
+      window.open(`https://wa.me/${phone}?text=${encodeURIComponent(message)}`, '_blank');
+    } catch (error) {
+      console.error('Alert WhatsApp error:', error);
+      alert('تعذر تجهيز رسالة واتساب');
+    }
+  };
 
   const tabs = [
     { id: 'dashboard', label: 'الرئيسية', icon: (active) => (
@@ -71,17 +338,25 @@ const Dashboard = ({ isExpired, expiry, onReActivate }) => {
         return (
           <div className="flex flex-col h-full overflow-y-auto custom-scrollbar">
             {isExpired && (
-              <div className="mx-4 mt-4 p-4 bg-rose-500/10 border border-rose-500/30 rounded-2xl flex items-center justify-between gap-3 animate-pulse">
+              <div className="mx-4 mt-4 p-4 bg-rose-500/10 border border-rose-500/30 rounded-2xl flex items-center justify-between gap-3">
                 <div className="flex-1">
                   <h4 className="text-rose-400 font-bold text-sm">انتهى الاشتراك! ⚠️</h4>
-                  <p className="text-rose-400/80 text-[10px]">برجاء التجديد لمتابعة إضافة المعاملات الجديدة.</p>
+                  <p className="text-rose-400/80 text-[10px]">لتجديد الاشتراك تواصل معنا: <span dir="ltr">{SUPPORT_PHONE_DISPLAY}</span></p>
                 </div>
-                <button
-                  onClick={() => setShowRenewal(true)}
-                  className="bg-rose-500 text-white px-3 py-2 rounded-lg text-xs font-bold shadow-lg shadow-rose-500/20"
-                >
-                  تجديد الآن
-                </button>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={handleSupportWhatsApp}
+                    className="bg-emerald-600 text-white px-3 py-2 rounded-lg text-xs font-bold shadow-lg shadow-emerald-600/20"
+                  >
+                    واتساب
+                  </button>
+                  <button
+                    onClick={() => setShowRenewal(true)}
+                    className="bg-rose-500 text-white px-3 py-2 rounded-lg text-xs font-bold shadow-lg shadow-rose-500/20"
+                  >
+                    تجديد
+                  </button>
+                </div>
               </div>
             )}
 
@@ -106,6 +381,12 @@ const Dashboard = ({ isExpired, expiry, onReActivate }) => {
             </div>
 
             <div className="p-4 space-y-3">
+              <HomeAlertsPanel
+                alerts={homeAlerts}
+                loading={homeAlertsLoading}
+                onSelectAlert={setSelectedAlertType}
+              />
+
               {/* Manager Accounts Statistics */}
               <div className="bg-slate-800/40 border border-slate-700/50 rounded-2xl p-4">
                 <h3 className="text-sm font-bold text-white mb-3 flex items-center gap-2">
@@ -170,6 +451,7 @@ const Dashboard = ({ isExpired, expiry, onReActivate }) => {
                   onClick={async () => {
                     const newValue = !selectedCustomer.is_manually_flagged_as_overdue;
                     await customerService.update(selectedCustomer.id, { is_manually_flagged_as_overdue: newValue });
+                    notificationService.refreshSchedule().catch(error => console.error('Notification refresh error:', error));
                     setSelectedCustomer({ ...selectedCustomer, is_manually_flagged_as_overdue: newValue });
                   }}
                   className={`px-3 py-2 rounded-lg text-xs font-bold transition-all border ${
@@ -240,6 +522,7 @@ const Dashboard = ({ isExpired, expiry, onReActivate }) => {
                   onClick={async () => {
                     const newValue = !selectedCustomer.is_manually_flagged_as_overdue;
                     await customerService.update(selectedCustomer.id, { is_manually_flagged_as_overdue: newValue });
+                    notificationService.refreshSchedule().catch(error => console.error('Notification refresh error:', error));
                     setSelectedCustomer({ ...selectedCustomer, is_manually_flagged_as_overdue: newValue });
                   }}
                   className={`px-3 py-2 rounded-lg text-xs font-bold transition-all border ${
@@ -289,6 +572,8 @@ const Dashboard = ({ isExpired, expiry, onReActivate }) => {
         return <Settings 
           isReadOnly={isExpired} 
           onRenewalRequest={() => setShowRenewal(true)} 
+          onSettingsChange={loadHomeAlerts}
+          onLicenseRenewed={onReActivate}
         />;
 
       default:
@@ -350,9 +635,19 @@ const Dashboard = ({ isExpired, expiry, onReActivate }) => {
         </div>
       </nav>
 
+      {selectedAlertType && (
+        <AlertDetailsModal
+          type={selectedAlertType}
+          items={selectedAlertItems}
+          onClose={() => setSelectedAlertType(null)}
+          onOpenCustomer={handleOpenAlertCustomer}
+          onSendWhatsApp={handleAlertWhatsApp}
+        />
+      )}
+
       {/* ── Renewal Modal ── */}
       {showRenewal && (
-        <div className="fixed inset-0 z-[10000] flex items-center justify-center">
+        <div className="fixed inset-0 z-[10000] flex items-center justify-center modal-safe-area">
           <div className="absolute inset-0 bg-black/80 backdrop-blur-sm" onClick={() => setShowRenewal(false)} />
           <div className="relative w-full max-w-sm mx-4">
             <button

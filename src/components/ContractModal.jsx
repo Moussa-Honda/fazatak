@@ -1,9 +1,18 @@
 import { useState, useEffect } from 'react';
 import { contractService, installmentService, customerService, settingsService } from '../services/database';
+import { notificationService } from '../services/notificationService';
 import { getDefaultDueDate } from '../utils/dateUtils';
 import { sanitizePhoneNumber } from '../utils/phoneUtils';
 
-const ContractModal = ({ isOpen, onClose, onSave, customerId, customerName, isBlacklisted, themeColor = 'blue' }) => {
+const getPaidAmount = (installment) => {
+  const actualPaid = Number(installment?.actual_paid || 0);
+  const status = String(installment?.status || '').trim().toLowerCase();
+  return status === 'paid' && actualPaid <= 0
+    ? Number(installment?.amount || 0)
+    : actualPaid;
+};
+
+const ContractModal = ({ isOpen, onClose, onSave, customerId, customerName, isBlacklisted, contract = null, themeColor = 'blue' }) => {
   const themeBg = themeColor === 'indigo' ? 'bg-indigo-600' : 'bg-emerald-600';
   const themeFocus = themeColor === 'indigo' ? 'focus:border-indigo-500' : 'focus:border-blue-500';
   const themeShadow = themeColor === 'indigo' ? 'shadow-indigo-600/30' : 'shadow-emerald-600/30';
@@ -20,23 +29,53 @@ const ContractModal = ({ isOpen, onClose, onSave, customerId, customerName, isBl
   const [loading, setLoading] = useState(false);
   const [salaryDaySync, setSalaryDaySync] = useState(false);
   const [customerCreditScore, setCustomerCreditScore] = useState('A');
+  const [enableReschedule, setEnableReschedule] = useState(false);
+  const [paidCredit, setPaidCredit] = useState(0);
+  const isEditing = Boolean(contract?.id);
 
   useEffect(() => {
     if (isOpen) {
       loadSettings();
-      checkCreditScore();
-      setFormData({
-        title: '',
-        capital_amount: '',
-        total_amount: '',
-        monthly_amount: '',
-        installment_count: '',
-        first_due_date: salaryDaySync ? getDefaultDueDate() : new Date().toISOString().split('T')[0],
-        guarantor_name: '',
-        guarantor_phone: ''
-      });
+      if (customerId) checkCreditScore();
+
+      if (contract) {
+        setEnableReschedule(false);
+        setPaidCredit(Math.round(Number(contract.total_paid || 0)));
+        setFormData({
+          title: contract.title || '',
+          capital_amount: contract.capital_amount ?? '',
+          total_amount: contract.total_amount ?? '',
+          monthly_amount: '',
+          installment_count: '',
+          first_due_date: contract.creation_date?.split('T')?.[0] || new Date().toISOString().split('T')[0],
+          guarantor_name: contract.guarantor_name || '',
+          guarantor_phone: contract.guarantor_phone || ''
+        });
+
+        installmentService.getByContractId(contract.id).then((items) => {
+          const paid = items.reduce((sum, item) => sum + getPaidAmount(item), 0);
+          const firstPending = items.find(item => item.status !== 'paid')?.due_date;
+          setPaidCredit(Math.round(paid));
+          if (firstPending) {
+            setFormData(prev => ({ ...prev, first_due_date: firstPending }));
+          }
+        }).catch(error => console.error('Load contract installments error:', error));
+      } else {
+        setEnableReschedule(false);
+        setPaidCredit(0);
+        setFormData({
+          title: '',
+          capital_amount: '',
+          total_amount: '',
+          monthly_amount: '',
+          installment_count: '',
+          first_due_date: salaryDaySync ? getDefaultDueDate() : new Date().toISOString().split('T')[0],
+          guarantor_name: '',
+          guarantor_phone: ''
+        });
+      }
     }
-  }, [isOpen, salaryDaySync]);
+  }, [isOpen, salaryDaySync, contract, customerId]);
 
   const loadSettings = async () => {
     const salary = await settingsService.get('salary_day_sync');
@@ -51,12 +90,12 @@ const ContractModal = ({ isOpen, onClose, onSave, customerId, customerName, isBl
   const handleSubmit = async (e) => {
     e.preventDefault();
     
-    if (isBlacklisted) {
+    if (!isEditing && isBlacklisted) {
       const confirmed = window.confirm('⚠️ هذا العميل في القائمة السوداء. هل تريد المتابعة؟');
       if (!confirmed) return;
     }
 
-    if (customerCreditScore === 'C') {
+    if (!isEditing && customerCreditScore === 'C') {
       const confirmed = window.confirm('⚠️ هذا العميل لديه تقييم ائتماني ضعيف (C). هل تريد المتابعة؟');
       if (!confirmed) return;
     }
@@ -69,20 +108,81 @@ const ContractModal = ({ isOpen, onClose, onSave, customerId, customerName, isBl
       const totalAmount = parseFloat(formData.total_amount) || 0;
       const monthlyAmount = parseFloat(formData.monthly_amount) || 0;
       const months = parseFloat(formData.installment_count) || 0;
+      const totalMonths = Math.ceil(months);
+      const numberOfRegularMonths = totalMonths - 1;
+      const totalRegularAmount = monthlyAmount * numberOfRegularMonths;
+      const lastInstallmentAmount = totalAmount - totalRegularAmount;
+
+      if (isEditing) {
+        if (enableReschedule) {
+          if (paidCredit > totalAmount) {
+            alert('المدفوع الحالي أكبر من إجمالي العقد الجديد. ارفع الإجمالي أو لا تستخدم إعادة الجدولة.');
+            setLoading(false);
+            return;
+          }
+
+          const confirmed = window.confirm(
+            `سيتم إعادة بناء جدول الأقساط وتوزيع المدفوع السابق (${paidCredit.toLocaleString('en-US')} ر.س) على الأقساط الجديدة.\n\nهل تريد المتابعة؟`
+          );
+
+          if (!confirmed) {
+            setLoading(false);
+            return;
+          }
+
+          await contractService.reschedule(
+            contract.id,
+            {
+              title,
+              capital_amount: capitalAmount,
+              total_amount: totalAmount,
+              guarantor_name: formData.guarantor_name || null,
+              guarantor_phone: formData.guarantor_phone ? sanitizePhoneNumber(formData.guarantor_phone) : null
+            },
+            {
+              monthly_amount: monthlyAmount,
+              installment_count: months,
+              first_due_date: formData.first_due_date
+            }
+          );
+
+          notificationService.refreshSchedule().catch(error => console.error('Notification refresh error:', error));
+          onSave?.();
+          onClose();
+          return;
+        }
+
+        await contractService.update(contract.id, {
+          title,
+          capital_amount: capitalAmount,
+          total_amount: totalAmount,
+          guarantor_name: formData.guarantor_name || null,
+          guarantor_phone: formData.guarantor_phone ? sanitizePhoneNumber(formData.guarantor_phone) : null
+        });
+
+        notificationService.refreshSchedule().catch(error => console.error('Notification refresh error:', error));
+        onSave?.();
+        onClose();
+        return;
+      }
 
       // Validation: Check if months are sufficient
       // The last month can have extra amount to cover the total
       // Example: 7600 total, 500 monthly, 15 months
       // 14 months × 500 = 7000, last month = 600 (500 + 100 extra) ✓
-      
-      const regularAmountTotal = monthlyAmount * (months - 1);
-      const lastMonthMin = totalAmount - regularAmountTotal;
-      
+
       // Last month must be at least the monthly amount (can be more)
-      if (lastMonthMin > monthlyAmount * 2) {
+      if (lastInstallmentAmount > monthlyAmount * 2) {
         // If last month needs more than 2x monthly, reject
-        const requiredMonths = Math.ceil(totalAmount / monthlyAmount);
+        const requiredMonths = Math.ceil((totalAmount - (monthlyAmount * 2)) / monthlyAmount) + 1;
         alert(`❌ عدد الأشهر غير كافٍ!\n\nالمطلوب: ${requiredMonths} أشهر على الأقل\nالمُدخل: ${months} شهر\n\nلتغطية مبلغ ${totalAmount.toLocaleString('ar-SA')} ريال بقسط شهري ${monthlyAmount.toLocaleString('ar-SA')} ريال`);
+        setLoading(false);
+        return;
+      }
+
+      if (lastInstallmentAmount < monthlyAmount) {
+        const maxMonths = Math.max(1, Math.floor(totalAmount / monthlyAmount));
+        alert(`❌ عدد الأشهر زائد!\n\nالحد الأقصى المناسب: ${maxMonths} شهر\nالمُدخل: ${months} شهر\n\nالقسط الأخير سيصبح ${lastInstallmentAmount.toLocaleString('ar-SA')} ريال، ويجب أن يكون مساوياً للقسط الشهري أو أعلى منه.`);
         setLoading(false);
         return;
       }
@@ -97,7 +197,6 @@ const ContractModal = ({ isOpen, onClose, onSave, customerId, customerName, isBl
       });
 
       const firstDate = new Date(formData.first_due_date);
-      const totalMonths = Math.ceil(months);
       
       // Smart calculation: distribute total amount across months
       // Example: 7600 total, 500 monthly, 15 months
@@ -106,12 +205,6 @@ const ContractModal = ({ isOpen, onClose, onSave, customerId, customerName, isBl
       
       // All months except last get the regular monthly amount
       const regularInstallmentAmount = monthlyAmount;
-      const numberOfRegularMonths = totalMonths - 1;
-      const totalRegularAmount = regularInstallmentAmount * numberOfRegularMonths;
-      
-      // Last installment gets the remainder (can be more than monthly amount)
-      const lastInstallmentAmount = totalAmount - totalRegularAmount;
-      
       for (let i = 0; i < totalMonths; i++) {
         const dueDate = new Date(firstDate);
         dueDate.setMonth(dueDate.getMonth() + i);
@@ -143,6 +236,7 @@ const ContractModal = ({ isOpen, onClose, onSave, customerId, customerName, isBl
         }
       }
 
+      notificationService.refreshSchedule().catch(error => console.error('Notification refresh error:', error));
       onSave();
       onClose();
     } catch (error) {
@@ -155,16 +249,24 @@ const ContractModal = ({ isOpen, onClose, onSave, customerId, customerName, isBl
   const totalAmount = parseFloat(formData.total_amount) || 0;
   const installmentCount = parseFloat(formData.installment_count) || 0;
   const monthlyAmount = parseFloat(formData.monthly_amount) || 0;
+  const previewTotalMonths = Math.ceil(installmentCount);
+  const previewRegularMonths = Math.max(0, previewTotalMonths - 1);
+  const previewLastInstallment = totalAmount - (monthlyAmount * previewRegularMonths);
+  const hasInstallmentPreview = totalAmount > 0 && installmentCount > 0 && monthlyAmount > 0;
+  const previewNeedsMoreMonths = hasInstallmentPreview && previewLastInstallment > monthlyAmount * 2;
+  const previewHasTooManyMonths = hasInstallmentPreview && previewLastInstallment < monthlyAmount;
+  const previewMaxMonths = monthlyAmount > 0 ? Math.max(1, Math.floor(totalAmount / monthlyAmount)) : 0;
+  const previewRemainingAfterPaid = Math.max(0, Math.round(totalAmount - paidCredit));
 
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4">
+    <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 modal-safe-area">
       <div className="bg-slate-800 rounded-2xl w-full max-w-md overflow-hidden max-h-[90dvh] flex flex-col">
         <div className={`${themeColor === 'indigo' ? 'bg-indigo-900/50' : 'bg-slate-700'} px-6 py-4 flex justify-between items-center shrink-0`}>
           <div>
-            <h3 className="text-lg font-bold text-white">عقد جديد - {customerName}</h3>
-            {customerCreditScore !== 'A' && (
+            <h3 className="text-lg font-bold text-white">{isEditing ? 'تعديل العقد' : `عقد جديد - ${customerName}`}</h3>
+            {!isEditing && customerCreditScore !== 'A' && (
               <div className={`text-xs mt-1 px-2 py-0.5 rounded inline-block ${
                 customerCreditScore === 'B' ? 'bg-amber-500/20 text-amber-400' : 'bg-rose-500/20 text-rose-400'
               }`}>
@@ -180,7 +282,7 @@ const ContractModal = ({ isOpen, onClose, onSave, customerId, customerName, isBl
           </button>
         </div>
 
-        {isBlacklisted && (
+        {!isEditing && isBlacklisted && (
           <div className="bg-rose-500/20 border border-rose-500/50 text-rose-400 px-4 py-3 m-4 rounded-xl">
             ⚠️ تحذير: هذا العميل في القائمة السوداء
           </div>
@@ -226,6 +328,37 @@ const ContractModal = ({ isOpen, onClose, onSave, customerId, customerName, isBl
             />
           </div>
 
+          {isEditing && (
+            <div className="bg-slate-900/70 border border-slate-700 rounded-xl p-4 space-y-3">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <p className="text-white font-bold text-sm">إعادة جدولة الأقساط</p>
+                  <p className="text-slate-400 text-xs mt-1">توزيع المدفوع السابق على جدول جديد</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setEnableReschedule(value => !value)}
+                  className={`w-14 h-8 rounded-full transition-colors relative shrink-0 ${enableReschedule ? 'bg-emerald-500' : 'bg-slate-600'}`}
+                >
+                  <span className={`absolute top-1 w-6 h-6 rounded-full bg-white transition-transform ${enableReschedule ? 'left-7' : 'left-1'}`} />
+                </button>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3 text-xs">
+                <div className="bg-slate-800 rounded-lg p-3">
+                  <p className="text-slate-500">المدفوع الحالي</p>
+                  <p className="text-emerald-400 font-black mt-1">{paidCredit.toLocaleString('en-US')} ر.س</p>
+                </div>
+                <div className="bg-slate-800 rounded-lg p-3">
+                  <p className="text-slate-500">المتبقي بعد الجدولة</p>
+                  <p className="text-rose-400 font-black mt-1">{previewRemainingAfterPaid.toLocaleString('en-US')} ر.س</p>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {(!isEditing || enableReschedule) && (
+            <>
           <div className="grid grid-cols-2 gap-4">
             <div>
               <label className="block text-sm text-slate-400 mb-2">القسط الشهري</label>
@@ -236,7 +369,7 @@ const ContractModal = ({ isOpen, onClose, onSave, customerId, customerName, isBl
                 onChange={(e) => setFormData({ ...formData, monthly_amount: e.target.value })}
                 className={`w-full bg-slate-900 border border-slate-600 rounded-xl px-4 py-3 text-white ${themeFocus} focus:outline-none transition-colors`}
                 placeholder="0.00"
-                required
+                required={!isEditing || enableReschedule}
               />
             </div>
 
@@ -250,7 +383,7 @@ const ContractModal = ({ isOpen, onClose, onSave, customerId, customerName, isBl
                 onChange={(e) => setFormData({ ...formData, installment_count: e.target.value })}
                 className={`w-full bg-slate-900 border border-slate-600 rounded-xl px-4 py-3 text-white ${themeFocus} focus:outline-none transition-colors`}
                 placeholder="مثال: 12 أو 3.5"
-                required
+                required={!isEditing || enableReschedule}
               />
             </div>
           </div>
@@ -265,16 +398,42 @@ const ContractModal = ({ isOpen, onClose, onSave, customerId, customerName, isBl
             />
           </div>
 
-          {totalAmount > 0 && installmentCount > 0 && monthlyAmount > 0 && (
-            <div className="bg-slate-700/50 rounded-xl p-4 text-center border border-slate-600">
+          {hasInstallmentPreview && (
+            <div className={`rounded-xl p-4 text-center border ${
+              previewNeedsMoreMonths || previewHasTooManyMonths
+                ? 'bg-rose-500/10 border-rose-500/40'
+                : 'bg-slate-700/50 border-slate-600'
+            }`}>
               <p className="text-slate-400 text-sm mb-1">توزيع الأقساط</p>
-              <p className="text-lg text-amber-400">
-                الأقساط 1-{Math.ceil(installmentCount) - 1}: <span className="font-bold">{monthlyAmount.toLocaleString('ar-SA')}</span> ريال
-              </p>
-              <p className="text-slate-500 text-xs mt-1">
-                القسط الأخير: {(totalAmount - (monthlyAmount * (Math.ceil(installmentCount) - 1))).toLocaleString('ar-SA')} ريال
-              </p>
+              {previewNeedsMoreMonths ? (
+                <p className="text-rose-300 text-sm leading-6">
+                  عدد الأقساط غير كافٍ. القسط الأخير سيصبح {previewLastInstallment.toLocaleString('ar-SA')} ريال.
+                </p>
+              ) : previewHasTooManyMonths ? (
+                <p className="text-rose-300 text-sm leading-6">
+                  عدد الأقساط زائد. الحد الأقصى المناسب {previewMaxMonths} شهر.
+                </p>
+              ) : (
+                <>
+                  {isEditing && enableReschedule && paidCredit > 0 && (
+                    <p className="text-emerald-300 text-sm leading-6 mb-2">
+                      سيتم خصم {paidCredit.toLocaleString('en-US')} ر.س من أول الأقساط الجديدة.
+                    </p>
+                  )}
+                  {previewRegularMonths > 0 && (
+                    <p className="text-lg text-amber-400">
+                      الأقساط 1-{previewRegularMonths}: <span className="font-bold">{monthlyAmount.toLocaleString('ar-SA')}</span> ريال
+                    </p>
+                  )}
+                  <p className="text-slate-500 text-xs mt-1">
+                    القسط الأخير: {previewLastInstallment.toLocaleString('ar-SA')} ريال
+                  </p>
+                </>
+              )}
             </div>
+          )}
+
+            </>
           )}
 
           {/* Guarantor Section */}
@@ -309,7 +468,7 @@ const ContractModal = ({ isOpen, onClose, onSave, customerId, customerName, isBl
             disabled={loading}
             className={`w-full ${themeBg} text-white py-3 rounded-xl font-bold btn-press disabled:opacity-50 shadow-lg ${themeShadow}`}
           >
-            {loading ? 'جاري الإنشاء...' : 'إنشاء العقد والأقساط'}
+            {loading ? 'جاري الحفظ...' : (isEditing && enableReschedule ? 'حفظ وإعادة الجدولة' : isEditing ? 'حفظ التعديلات' : 'إنشاء العقد والأقساط')}
           </button>
         </form>
       </div>

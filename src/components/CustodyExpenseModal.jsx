@@ -34,7 +34,7 @@ const CustodyExpenseModal = ({ portfolioId, onClose, onSaved }) => {
   };
 
   return (
-    <div className="fixed inset-0 z-[1100] flex items-center justify-center p-4">
+    <div className="fixed inset-0 z-[1100] flex items-center justify-center modal-safe-area">
       <div className="absolute inset-0 bg-black/80 backdrop-blur-md" onClick={onClose} />
       
       <div className="relative w-full max-w-sm bg-slate-800 rounded-[2.5rem] border border-slate-700 shadow-2xl overflow-hidden">

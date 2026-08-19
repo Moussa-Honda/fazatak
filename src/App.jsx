@@ -3,6 +3,7 @@ import Dashboard from './screens/Dashboard';
 import LicenseGate from './components/LicenseGate';
 import licenseService from './services/license';
 import { settingsService } from './services/database';
+import { notificationService } from './services/notificationService';
 import { PrivacyScreen } from '@capacitor-community/privacy-screen';
 import './index.css';
 
@@ -17,6 +18,14 @@ function App() {
     checkAppLicense();
     initScreenPrivacy();
   }, []);
+
+  useEffect(() => {
+    if (!isLicensed) return;
+
+    notificationService.refreshSchedule().catch((error) => {
+      console.error('Notification schedule init error:', error);
+    });
+  }, [isLicensed]);
 
   const initScreenPrivacy = async () => {
     try {
@@ -48,7 +57,7 @@ function App() {
         try {
           const status = await licenseService.checkLicenseStatus();
           setExpiry(status.expiry);
-        } catch(e) {}
+        } catch {}
       } else {
         setIsLicensed(false);
       }

@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "350076349659",
+    "project_id": "fazatak-9f317",
+    "storage_bucket": "fazatak-9f317.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:350076349659:android:475ff39e0e6267c05df0fe",
+        "android_client_info": {
+          "package_name": "com.installment.app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBxnjBSWRfRijg1CzaFlhjyDuL994uEEnY"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

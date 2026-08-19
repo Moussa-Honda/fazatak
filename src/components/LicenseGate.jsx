@@ -2,6 +2,9 @@ import { useState, useEffect } from 'react';
 import { Clipboard } from '@capacitor/clipboard';
 import licenseService from '../services/license';
 
+const SUPPORT_PHONE_DISPLAY = '+966556854162';
+const SUPPORT_WHATSAPP_PHONE = '966556854162';
+
 const LicenseGate = ({ onActivated, isModal = false }) => {
   const [deviceId, setDeviceId] = useState('');
   const [code, setCode] = useState('');
@@ -22,6 +25,11 @@ const LicenseGate = ({ onActivated, isModal = false }) => {
     await Clipboard.write({ string: deviceId });
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
+  };
+
+  const handleSupportWhatsApp = () => {
+    const message = `السلام عليكم، أريد تجديد اشتراك تطبيق فزتك. رقم الجهاز: ${deviceId || ''}`;
+    window.open(`https://wa.me/${SUPPORT_WHATSAPP_PHONE}?text=${encodeURIComponent(message)}`, '_blank');
   };
 
   const handleActivate = async () => {
@@ -52,8 +60,8 @@ const LicenseGate = ({ onActivated, isModal = false }) => {
   };
 
   return (
-    <div className={`${!isModal ? 'fixed inset-0 z-[9999] bg-slate-950 flex items-center justify-center p-6 text-right' : 'text-right'}`} dir="rtl">
-      <div className={`w-full ${!isModal ? 'max-w-md' : ''} bg-slate-900 rounded-3xl border border-slate-800 shadow-2xl overflow-hidden`}>
+    <div className={`${!isModal ? 'fixed inset-0 z-[9999] bg-slate-950 flex items-start justify-center overflow-y-auto modal-safe-area text-right' : 'text-right'}`} dir="rtl">
+      <div className={`w-full ${!isModal ? 'max-w-md shrink-0 my-auto' : ''} bg-slate-900 rounded-3xl border border-slate-800 shadow-2xl overflow-hidden`}>
         {/* Header */}
         <div className="bg-gradient-to-br from-emerald-600 to-teal-700 p-8 text-center">
           <div className="w-20 h-20 bg-white/20 rounded-2xl flex items-center justify-center mx-auto mb-4 backdrop-blur-sm">
@@ -83,6 +91,25 @@ const LicenseGate = ({ onActivated, isModal = false }) => {
           </div>
 
           <div className="h-px bg-slate-800" />
+
+          <div className="bg-emerald-500/10 border border-emerald-500/25 rounded-2xl p-4 space-y-3">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <p className="text-white text-sm font-bold">لتجديد الاشتراك</p>
+                <p className="text-emerald-300 text-sm font-mono mt-1" dir="ltr">{SUPPORT_PHONE_DISPLAY}</p>
+              </div>
+              <button
+                type="button"
+                onClick={handleSupportWhatsApp}
+                className="h-10 px-4 bg-emerald-600 text-white rounded-xl text-sm font-bold hover:bg-emerald-500 transition-colors active:scale-95"
+              >
+                واتساب
+              </button>
+            </div>
+            <p className="text-[11px] text-slate-400 leading-5">
+              يرسل الزر رقم الجهاز تلقائيًا حتى تحصل على كود التجديد الصحيح.
+            </p>
+          </div>
 
           {/* Activation Code Section */}
           <div className="space-y-2">

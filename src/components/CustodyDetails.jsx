@@ -3,8 +3,9 @@ import { portfolioExpenseService, settingsService } from '../services/database';
 import { toHijriDate } from '../utils/dateUtils';
 import { generatePDF, PDF_MODES } from '../utils/pdfGenerator';
 import CustodyExpenseModal from './CustodyExpenseModal';
+import { useLiveRefresh } from '../hooks/useLiveRefresh';
 
-const CustodyDetails = ({ custody, onBack, isReadOnly }) => {
+const CustodyDetails = ({ custody, onBack }) => {
   const [expenses, setExpenses] = useState([]);
   const [loading, setLoading] = useState(true);
   const [spent, setSpent] = useState(0);
@@ -35,6 +36,8 @@ const CustodyDetails = ({ custody, onBack, isReadOnly }) => {
       setLoading(false);
     }
   };
+
+  useLiveRefresh(loadData, Boolean(custody?.id));
 
   const handleDeleteExpense = async (id) => {
     if (window.confirm('هل أنت متأكد من حذف هذا المصروف؟')) {

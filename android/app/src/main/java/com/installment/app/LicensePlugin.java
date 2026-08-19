@@ -123,19 +123,24 @@ public class LicensePlugin extends Plugin {
                 return;
             }
 
+            SharedPreferences prefs = getPrefs();
             long now = System.currentTimeMillis() / 1000;
+            long currentExpiry = prefs.getLong("expiry", 0);
             long expiry;
             if (matchedDuration.equals("9999")) {
                 expiry = 2147483647L;
+            } else if (currentExpiry > 2100000000L) {
+                expiry = currentExpiry;
             } else {
-                expiry = now + (Long.parseLong(matchedDuration) * 24 * 60 * 60);
+                long baseTime = Math.max(now, currentExpiry);
+                expiry = baseTime + (Long.parseLong(matchedDuration) * 24 * 60 * 60);
             }
 
             // Derive a unique key for this license/device combination
             String keySource = deviceId + cleanCode + SECRET_SALT;
             String derivedKey = generateNumericHash(keySource).substring(0, 8); // Simple 8-char key
 
-            getPrefs().edit()
+            prefs.edit()
                 .putString("license_code", cleanCode)
                 .putLong("expiry", expiry)
                 .putLong("last_seen_time", now)

@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { managerService } from '../services/database';
 import ManagerModal from './ManagerModal';
+import { useLiveRefresh } from '../hooks/useLiveRefresh';
 
 const ManagerList = ({ onSelectManager, onBack, filterType = 'all' }) => {
   const [managers, setManagers] = useState([]);
@@ -27,6 +28,8 @@ const ManagerList = ({ onSelectManager, onBack, filterType = 'all' }) => {
       setLoading(false);
     }
   };
+
+  useLiveRefresh(loadManagers);
 
   const handleDelete = async (manager, e) => {
     e.stopPropagation();

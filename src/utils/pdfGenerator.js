@@ -22,15 +22,24 @@ const fmtDate = (d) => {
 };
 const today = () => fmtDate(new Date().toISOString());
 
+const getPaidAmount = (installment) => {
+  const actualPaid = Number(installment?.actual_paid || 0);
+  const status = String(installment?.status || '').trim().toLowerCase();
+  return status === 'paid' && actualPaid <= 0
+    ? Number(installment?.amount || 0)
+    : actualPaid;
+};
+
 const loadSettings = async () => {
   try {
     return {
       businessName:    (await settingsService.get('business_name'))      || '',
       businessContact: (await settingsService.get('business_contact'))   || '',
+      taxNumber:       (await settingsService.get('tax_number'))          || '',
       showDetails:     (await settingsService.get('show_details_on_pdf')) === 'true',
       ibanNumber:      (await settingsService.get('iban_number'))         || '',
     };
-  } catch { return { businessName:'', businessContact:'', showDetails:false, ibanNumber:'' }; }
+  } catch { return { businessName:'', businessContact:'', taxNumber:'', showDetails:false, ibanNumber:'' }; }
 };
 
 // ─── Shared CSS ───────────────────────────────────────────────────────────────
@@ -43,15 +52,16 @@ const BASE_CSS = `
             display:flex; justify-content:space-between; align-items:flex-start; }
   .header .title { font-size:22px; font-weight:bold; }
   .header .sub   { font-size:11px; margin-top:4px; opacity:.85; }
-  .header .co    { font-size:15px; text-align:left; }
+  .header .co    { font-size:15px; text-align:left; line-height:1.7; }
+  .header .co small { display:block; font-size:10px; opacity:.85; }
   .divider { height:1px; background:#ddd; margin:0 24px; }
   .info { display:flex; justify-content:space-between; padding:14px 24px; }
   .info-col { display:flex; flex-direction:column; gap:6px; }
   .lbl { font-size:10px; color:#888; }
   .val { font-size:13px; font-weight:bold; }
   table { width:calc(100% - 48px); margin:0 24px; border-collapse:collapse; }
-  th { background:#4b4b4b; color:#fff; padding:9px 10px; font-size:11px; text-align:right; }
-  td { padding:8px 10px; font-size:11px; border:1px solid #ddd; text-align:right; }
+  th { background:#4b4b4b; color:#fff; padding:9px 10px; font-size:11px; text-align:center; vertical-align:middle; }
+  td { padding:8px 10px; font-size:11px; border:1px solid #ddd; text-align:center; vertical-align:middle; }
   tr:nth-child(even) td { background:#f5f5f5; }
   .totals { margin:12px 24px 0; border:1px solid #ddd; border-radius:4px; overflow:hidden; }
   .tot-row { display:flex; justify-content:space-between; padding:8px 14px; font-size:11px; }
@@ -82,6 +92,18 @@ const wrap = (body) => `
 <head><meta charset="UTF-8"><style>${BASE_CSS}</style></head>
 <body>${body}</body></html>`;
 
+const businessDetailsHTML = (s) => {
+  if (!s.showDetails) return '';
+
+  const lines = [
+    s.businessName ? `<div>${s.businessName}</div>` : '',
+    s.businessContact ? `<small>جوال: ${s.businessContact}</small>` : '',
+    s.taxNumber ? `<small>الرقم الضريبي: ${s.taxNumber}</small>` : '',
+  ].filter(Boolean);
+
+  return lines.join('');
+};
+
 const headerHTML = (title, sub, s, managedBy = null) => `
 <div class="header">
   <div>
@@ -89,9 +111,7 @@ const headerHTML = (title, sub, s, managedBy = null) => `
     ${sub ? `<div class="sub">${sub}</div>` : ''}
     ${managedBy ? `<div class="sub" style="font-size:9px; opacity:0.7; margin-top:2px;">هذا الحساب يدار بالنيابة بواسطة: ${managedBy}</div>` : ''}
   </div>
-  <div class="co">${s.showDetails && s.businessName ? s.businessName : 'اسم النشاط'}<br>
-    <small>${s.showDetails && s.businessContact ? s.businessContact : ''}</small>
-  </div>
+  <div class="co">${businessDetailsHTML(s)}</div>
 </div>`;
 
 const footerHTML = (iban) => `
@@ -114,10 +134,10 @@ const buildGlobalHTML = async (customer, contracts, s, managedBy = null) => {
   for (const c of contracts) {
     if (!c?.id) continue;
     let insts = [];
-    try { insts = (await installmentService.getByContractId(c.id)) || []; } catch (_) {}
+    try { insts = (await installmentService.getByContractId(c.id)) || []; } catch { /* Keep the statement printable if installments fail to load. */ }
     const total  = c.total_amount   || 0;
     const disc   = c.discount_amount || 0;
-    const paid   = insts.filter(i => i?.status === 'paid').reduce((s, i) => s + (i.actual_paid || 0), 0);
+    const paid   = insts.reduce((s, i) => s + getPaidAmount(i), 0);
     const remain = Math.max(0, total - paid - disc);
     rows += `<tr>
       <td>${c.title || '#' + c.id}</td>
@@ -147,22 +167,94 @@ const buildGlobalHTML = async (customer, contracts, s, managedBy = null) => {
 };
 
 // ─── Mode 2: Contract Detail ──────────────────────────────────────────────────
-const ORDS = ['الأول','الثاني','الثالث','الرابع','الخامس','السادس','السابع','الثامن','التاسع','العاشر'];
+const ORDINAL_UNITS = ['', 'الأول', 'الثاني', 'الثالث', 'الرابع', 'الخامس', 'السادس', 'السابع', 'الثامن', 'التاسع', 'العاشر'];
+const COMPOUND_ORDINAL_UNITS = ['', 'الحادي', 'الثاني', 'الثالث', 'الرابع', 'الخامس', 'السادس', 'السابع', 'الثامن', 'التاسع'];
+const ORDINAL_TENS = ['', '', 'العشرون', 'الثلاثون', 'الأربعون', 'الخمسون', 'الستون', 'السبعون', 'الثمانون', 'التسعون'];
+const CARDINAL_UNITS = ['', 'واحد', 'اثنان', 'ثلاثة', 'أربعة', 'خمسة', 'ستة', 'سبعة', 'ثمانية', 'تسعة'];
+const CARDINAL_TEENS = ['', '', '', '', '', '', '', '', '', '', 'عشرة', 'أحد عشر', 'اثنا عشر', 'ثلاثة عشر', 'أربعة عشر', 'خمسة عشر', 'ستة عشر', 'سبعة عشر', 'ثمانية عشر', 'تسعة عشر'];
+const CARDINAL_TENS = ['', '', 'عشرون', 'ثلاثون', 'أربعون', 'خمسون', 'ستون', 'سبعون', 'ثمانون', 'تسعون'];
+const CARDINAL_HUNDREDS = ['', 'المائة', 'المائتان', 'الثلاثمائة', 'الأربعمائة', 'الخمسمائة', 'الستمائة', 'السبعمائة', 'الثمانمائة', 'التسعمائة'];
+const CARDINAL_SCALES = [
+  { value: 1000000000000000, singular: 'الكوادريليون', dual: 'الكوادريليونان', plural: 'كوادريليونات', counted: 'كوادريليون' },
+  { value: 1000000000000, singular: 'التريليون', dual: 'التريليونان', plural: 'تريليونات', counted: 'تريليون' },
+  { value: 1000000000, singular: 'المليار', dual: 'الملياران', plural: 'مليارات', counted: 'مليار' },
+  { value: 1000000, singular: 'المليون', dual: 'المليونان', plural: 'ملايين', counted: 'مليون' },
+  { value: 1000, singular: 'الألف', dual: 'الألفان', plural: 'آلاف', counted: 'ألف' },
+];
+
+const getArabicOrdinalUnder100 = (number) => {
+  if (number <= 10) return ORDINAL_UNITS[number];
+  if (number < 20) return `${COMPOUND_ORDINAL_UNITS[number - 10]} عشر`;
+  const unit = number % 10;
+  const ten = Math.floor(number / 10);
+  return unit === 0 ? ORDINAL_TENS[ten] : `${COMPOUND_ORDINAL_UNITS[unit]} وال${ORDINAL_TENS[ten].slice(2)}`;
+};
+
+const getArabicCardinalUnder100 = (number) => {
+  if (number < 10) return CARDINAL_UNITS[number];
+  if (number < 20) return CARDINAL_TEENS[number];
+  const unit = number % 10;
+  const ten = Math.floor(number / 10);
+  return unit === 0 ? CARDINAL_TENS[ten] : `${CARDINAL_UNITS[unit]} و${CARDINAL_TENS[ten]}`;
+};
+
+const getArabicCardinalUnder1000 = (number) => {
+  if (number < 100) return getArabicCardinalUnder100(number);
+  const hundred = Math.floor(number / 100);
+  const remainder = number % 100;
+  return remainder === 0 ? CARDINAL_HUNDREDS[hundred] : `${CARDINAL_HUNDREDS[hundred]} و${getArabicCardinalUnder100(remainder)}`;
+};
+
+const getArabicScaleText = (count, scale) => {
+  if (count === 1) return scale.singular;
+  if (count === 2) return scale.dual;
+  if (count <= 10) return `${getArabicCardinal(count)} ${scale.plural}`;
+  return `${getArabicCardinal(count)} ${scale.counted}`;
+};
+
+const getArabicCardinal = (number) => {
+  if (number < 1000) return getArabicCardinalUnder1000(number);
+  const scale = CARDINAL_SCALES.find(item => number >= item.value);
+  if (!scale) return fmt(number);
+  const count = Math.floor(number / scale.value);
+  const remainder = number % scale.value;
+  const scaleText = getArabicScaleText(count, scale);
+  return remainder === 0 ? scaleText : `${scaleText} و${getArabicCardinal(remainder)}`;
+};
+
+const getArabicOrdinal = (number) => {
+  const value = Number(number);
+  if (!Number.isFinite(value) || value < 1) return String(number || '');
+  const normalized = Math.trunc(value);
+  if (normalized < 100) return getArabicOrdinalUnder100(normalized);
+  const remainder = normalized % 100;
+  return remainder === 0
+    ? getArabicCardinal(normalized)
+    : `${getArabicCardinal(normalized - remainder)} و${getArabicOrdinalUnder100(remainder)}`;
+};
+
 const buildContractHTML = async (customer, contract, s, managedBy = null) => {
   let insts = [];
-  try { insts = (await installmentService.getByContractId(contract.id)) || []; } catch (_) {}
+  try { insts = (await installmentService.getByContractId(contract.id)) || []; } catch { /* Keep the statement printable if installments fail to load. */ }
   const total  = contract.total_amount   || 0;
   const disc   = contract.discount_amount || 0;
-  const paid   = insts.filter(i => i?.status === 'paid').reduce((s, i) => s + (i.actual_paid || 0), 0);
+  const paid   = insts.reduce((s, i) => s + getPaidAmount(i), 0);
   const remain = Math.max(0, total - paid - disc);
 
   const rows = insts.map((inst, idx) => {
-    const cls = inst.status === 'paid' ? 'green' : inst.status === 'postponed' ? 'amber' : 'red';
-    const lbl = inst.status === 'paid' ? 'مدفوع' : inst.status === 'postponed' ? 'مؤجل' : 'متبقي';
+    const paidAmount = getPaidAmount(inst);
+    const remainingAmount = Math.max(0, Number(inst.amount || 0) - paidAmount);
+    const isPartial = inst.status !== 'paid' && paidAmount > 0 && remainingAmount > 0;
+    const cls = inst.status === 'paid' ? 'green' : inst.status === 'postponed' || isPartial ? 'amber' : 'red';
+    const lbl = inst.status === 'paid' ? 'مدفوع' : inst.status === 'postponed' ? 'مؤجل' : isPartial ? 'مدفوع جزئياً' : 'متبقي';
+    const amount = inst.status === 'paid' ? paidAmount : remainingAmount || inst.amount;
+    const amountText = isPartial
+      ? `${fmt(Math.round(amount || 0))} SAR<br><small class="green">مدفوع: ${fmt(Math.round(paidAmount))} SAR</small>`
+      : `${fmt(Math.round(amount || 0))} SAR`;
     return `<tr>
-      <td>القسط ${ORDS[idx] ?? '#'+(idx+1)}</td>
+      <td>القسط ${getArabicOrdinal(idx + 1)}</td>
       <td>${fmtDate(inst.due_date)}</td>
-      <td>${fmt(Math.round(inst.amount || 0))} SAR</td>
+      <td>${amountText}</td>
       <td class="${cls}">${lbl}</td>
     </tr>`;
   }).join('');
@@ -270,7 +362,7 @@ const renderHTMLtoPDF = async (htmlString) => {
   document.body.appendChild(container);
 
   // Wait for Amiri font to load
-  try { await document.fonts.ready; } catch (_) {}
+  try { await document.fonts.ready; } catch { /* Continue rendering with fallback fonts. */ }
 
   try {
     const canvas = await html2canvas(container, {

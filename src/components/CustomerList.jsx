@@ -1,13 +1,8 @@
 import { useState, useEffect } from 'react';
-import { customerService, contractService, settingsService, getDatabase } from '../services/database';
+import { customerService, contractService, settingsService } from '../services/database';
 import CustomerModal from './CustomerModal';
 import ContractModal from './ContractModal';
-
-// Helper function to round numbers
-const roundAmount = (amount) => {
-  if (!amount || isNaN(amount)) return 0;
-  return Math.round(amount);
-};
+import { useLiveRefresh } from '../hooks/useLiveRefresh';
 
 // Sanitize customer name - remove trailing 00 and whitespace
 const sanitizeName = (name) => {
@@ -15,13 +10,32 @@ const sanitizeName = (name) => {
   return name.replace(/\s*0+$/g, '').trim() || 'عميل';
 };
 
-// Get credit score display
-const getCreditScoreDisplay = (score) => {
-  switch (score) {
-    case 'A': return { text: '⭐⭐⭐', color: 'text-emerald-400', bg: 'bg-emerald-500/20' };
-    case 'B': return { text: '⭐⭐', color: 'text-amber-400', bg: 'bg-amber-500/20' };
-    case 'C': return { text: '⭐', color: 'text-rose-400', bg: 'bg-rose-500/20' };
-    default: return { text: '⭐⭐⭐', color: 'text-emerald-400', bg: 'bg-emerald-500/20' };
+const getCustomerMonthStatusDisplay = (status, managerId = null) => {
+  switch (status) {
+    case 'paid':
+      return {
+        label: 'سدد',
+        card: 'bg-emerald-950/60 border-emerald-400/50 shadow-emerald-950/30',
+        badge: 'bg-emerald-400/15 border-emerald-300/40 text-emerald-100'
+      };
+    case 'postponed':
+      return {
+        label: 'مؤجل',
+        card: 'bg-amber-950/60 border-amber-400/55 shadow-amber-950/30',
+        badge: 'bg-amber-300/15 border-amber-300/45 text-amber-100'
+      };
+    case 'overdue':
+      return {
+        label: 'غير مسدد',
+        card: 'bg-rose-950/65 border-rose-400/55 shadow-rose-950/30',
+        badge: 'bg-rose-300/15 border-rose-300/45 text-rose-100'
+      };
+    default:
+      return {
+        label: '',
+        card: `bg-[#1e293b]/60 ${managerId ? 'border-indigo-500/30' : 'border-slate-700/50'} shadow-slate-950/20`,
+        badge: ''
+      };
   }
 };
 
@@ -43,9 +57,9 @@ const CustomerList = ({
   const [showContractModal, setShowContractModal] = useState(false);
   const [selectedCustomer, setSelectedCustomer] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [customerScores, setCustomerScores] = useState({});
   const [customerBalances, setCustomerBalances] = useState({});
   const [overdueStatus, setOverdueStatus] = useState({});
+  const [customerMonthStatuses, setCustomerMonthStatuses] = useState({});
   const [recycleBinEnabled, setRecycleBinEnabled] = useState(false);
   const themeColor = managerId ? 'indigo' : 'blue';
   const themeBg = managerId ? 'bg-indigo-600' : 'bg-blue-600';
@@ -58,80 +72,76 @@ const CustomerList = ({
 
   useEffect(() => {
     filterCustomers();
-  }, [customers, search, activeTab]);
+  }, [customers, search, activeTab, overdueStatus, filterType]);
 
   const loadCustomers = async () => {
     setLoading(true);
-    const isRecycleBinEnabled = await settingsService.get('recycle_bin_enabled');
-    setRecycleBinEnabled(isRecycleBinEnabled === 'true');
+    try {
+      const [isRecycleBinEnabled, overdueThresholdSetting] = await Promise.all([
+        settingsService.get('recycle_bin_enabled'),
+        settingsService.get('overdue_threshold_days')
+      ]);
+      setRecycleBinEnabled(isRecycleBinEnabled === 'true');
 
-    // Use managerId if provided, otherwise 'personal' to show only user's own customers in main list
-    const filterId = managerId || 'personal';
-    // Load all customers including deleted
-    const data = await customerService.getAll(false, filterId, true);
-    
-    // Calculate remaining balance and credit score for each customer
-    const scores = {};
-    const balances = {};
-    
-    for (const customer of data) {
-      scores[customer.id] = await customerService.getCreditScore(customer.id);
-      balances[customer.id] = await contractService.getTotalRemainingByCustomer(customer.id);
-      
-      // Smart auto-archive logic
-      const contracts = await contractService.getByCustomerId(customer.id);
-      const hasContracts = contracts.length >= 1;
-      const totalRemaining = balances[customer.id];
-      
-      const shouldBeActive = !hasContracts || totalRemaining > 0;
-      const shouldBeArchived = hasContracts && totalRemaining === 0;
-      
-      if (shouldBeArchived && customer.status === 'active') {
-        await customerService.update(customer.id, { status: 'archived' });
-        customer.status = 'archived';
-      } else if (shouldBeActive && customer.status === 'archived') {
-        await customerService.update(customer.id, { status: 'active' });
-        customer.status = 'active';
-      } else if (!customer.status) {
-        // Fix for any corrupted records (status is NULL)
-        await customerService.update(customer.id, { status: 'active' });
-        customer.status = 'active';
-      }
-    }
-    
-    // Overdue Logic
-    const isOverdueMap = {};
-    const threshold = parseInt(await settingsService.get('overdue_threshold_days')) || 30;
-    const db = await getDatabase();
+      // Use managerId if provided, otherwise 'personal' to show only user's own customers in main list
+      const filterId = managerId || 'personal';
+      // Load all customers including deleted
+      const data = await customerService.getAll(false, filterId, true);
+      const customerIds = data.map(customer => customer.id);
+      const threshold = parseInt(overdueThresholdSetting, 10) || 30;
 
-    for (const customer of data) {
-      if (customer.is_manually_flagged_as_overdue) {
-        isOverdueMap[customer.id] = true;
-        continue;
-      }
+      const [balanceSummaries, overdueMap, monthStatusMap] = await Promise.all([
+        contractService.getCustomerBalanceSummaries(customerIds),
+        contractService.getOverdueCustomerMap(customerIds, threshold),
+        customerService.getCurrentMonthStatusMap(customerIds)
+      ]);
 
-      const contracts = await contractService.getByCustomerId(customer.id);
-      let foundOverdue = false;
-      for (const contract of contracts) {
-        if (contract.status !== 'active') continue;
-        const installments = await db.query(
-          `SELECT * FROM installments WHERE contract_id = ? AND status = 'pending' AND due_date < date('now', '-${threshold} days') LIMIT 1`,
-          [contract.id]
-        );
-        if (installments.values?.length > 0) {
-          foundOverdue = true;
-          break;
+      // Calculate display values from one grouped read instead of per-customer queries.
+      const balances = {};
+      const isOverdueMap = {};
+
+      for (const customer of data) {
+        const summary = balanceSummaries[customer.id] || {
+          contract_count: 0,
+          total_remaining: 0
+        };
+
+        balances[customer.id] = summary.total_remaining;
+
+        // Smart auto-archive logic
+        const hasContracts = summary.contract_count >= 1;
+        const totalRemaining = balances[customer.id];
+
+        const shouldBeActive = !hasContracts || totalRemaining > 0;
+        const shouldBeArchived = hasContracts && totalRemaining === 0;
+
+        if (shouldBeArchived && customer.status === 'active') {
+          await customerService.update(customer.id, { status: 'archived' });
+          customer.status = 'archived';
+        } else if (shouldBeActive && customer.status === 'archived') {
+          await customerService.update(customer.id, { status: 'active' });
+          customer.status = 'active';
+        } else if (!customer.status) {
+          // Fix for any corrupted records (status is NULL)
+          await customerService.update(customer.id, { status: 'active' });
+          customer.status = 'active';
         }
+
+        isOverdueMap[customer.id] = Boolean(customer.is_manually_flagged_as_overdue || overdueMap[customer.id]);
       }
-      isOverdueMap[customer.id] = foundOverdue;
+
+      setCustomerBalances(balances);
+      setOverdueStatus(isOverdueMap);
+      setCustomerMonthStatuses(monthStatusMap);
+      setCustomers(data);
+    } catch (error) {
+      console.error('Load customers error:', error);
+    } finally {
+      setLoading(false);
     }
-    
-    setCustomerScores(scores);
-    setCustomerBalances(balances);
-    setOverdueStatus(isOverdueMap);
-    setCustomers(data);
-    setLoading(false);
   };
+
+  useLiveRefresh(loadCustomers);
 
   const filterCustomers = () => {
     let result = customers;
@@ -321,22 +331,29 @@ const CustomerList = ({
         ) : (
           <div className="space-y-3">
             {filtered.map((customer) => {
-              const score = customerScores[customer.id] || 'A';
-              const scoreDisplay = getCreditScoreDisplay(score);
               const remainingBalance = customerBalances[customer.id] || 0;
+              const monthStatus = customer.is_deleted === 1 ? 'none' : (customerMonthStatuses[customer.id] || 'none');
+              const monthStatusDisplay = getCustomerMonthStatusDisplay(monthStatus, managerId);
               
               return (
                 <div
                   key={customer.id}
                   onClick={() => onSelect?.(customer)}
                   dir="rtl"
-                  className={`bg-[#1e293b]/60 backdrop-blur-md border ${managerId ? 'border-indigo-500/30' : 'border-slate-700/50'} rounded-2xl p-5 card-hover cursor-pointer flex items-center justify-between gap-4 mb-3`}
+                  className={`${monthStatusDisplay.card} backdrop-blur-md border rounded-2xl p-5 card-hover cursor-pointer flex items-center justify-between gap-4 mb-3 transition-colors duration-300`}
                 >
                   {/* ── Right Section: Name & Info ── */}
                   <div className="flex flex-col items-start min-w-0 flex-1">
-                    <h4 className="font-black text-white text-sm truncate w-full mb-1">
-                      {sanitizeName(customer.name)}
-                    </h4>
+                    <div className="flex items-center gap-2 w-full mb-1">
+                      <h4 className="font-black text-white text-sm truncate min-w-0">
+                        {sanitizeName(customer.name)}
+                      </h4>
+                      {monthStatusDisplay.label && (
+                        <span className={`shrink-0 px-2 py-0.5 rounded-full border text-[10px] font-black ${monthStatusDisplay.badge}`}>
+                          {monthStatusDisplay.label}
+                        </span>
+                      )}
+                    </div>
                     {customer.is_deleted === 1 ? (
                       <p className="text-rose-500 text-xs font-bold mt-1">
                         محذوف منذ: {customer.deleted_at ? customer.deleted_at.split(' ')[0] : 'غير معروف'}

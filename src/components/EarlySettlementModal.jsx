@@ -1,7 +1,8 @@
 import { useState, useEffect } from 'react';
 import { contractService } from '../services/database';
+import { notificationService } from '../services/notificationService';
 
-const EarlySettlementModal = ({ isOpen, onClose, onSave, contract, customerName, themeColor = 'blue' }) => {
+const EarlySettlementModal = ({ isOpen, onClose, onSave, contract, themeColor = 'blue' }) => {
   const themeBg = themeColor === 'indigo' ? 'bg-indigo-600' : 'bg-emerald-600';
   const themeFocus = themeColor === 'indigo' ? 'focus:border-indigo-500' : 'focus:border-emerald-500';
   const themeShadow = themeColor === 'indigo' ? 'shadow-indigo-600/30' : 'shadow-emerald-600/30';
@@ -48,6 +49,7 @@ const EarlySettlementModal = ({ isOpen, onClose, onSave, contract, customerName,
     try {
       await contractService.applyEarlySettlement(contract.id, discount);
       settlementSuccess = true;
+      notificationService.refreshSchedule().catch(error => console.error('Notification refresh error:', error));
       
       // Close modal first before calling onSave to prevent UI race conditions
       onClose();
@@ -72,7 +74,7 @@ const EarlySettlementModal = ({ isOpen, onClose, onSave, contract, customerName,
   if (!isOpen || !contract) return null;
 
   return (
-    <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4">
+    <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 modal-safe-area">
       <div className="bg-slate-800 rounded-2xl w-full max-w-md overflow-hidden shadow-2xl">
         <div className={`${themeColor === 'indigo' ? 'bg-indigo-900/50' : 'bg-slate-700'} px-6 py-4 flex justify-between items-center`}>
           <h3 className="text-lg font-bold text-white">سداد مبكر - {contract.title}</h3>
