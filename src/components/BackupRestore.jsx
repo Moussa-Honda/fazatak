@@ -4,12 +4,20 @@ import {
   checkBackupExists,
   createBackup,
   deleteBackup,
+  exportData,
   formatDate,
   formatFileSize,
+  importData,
   restoreBackup,
   restoreBackupFromText,
   shareBackup
 } from '../services/backupService';
+import {
+  isSupabaseConfigured,
+  saveCloudBackup,
+  listCloudBackups,
+  getCloudBackupById
+} from '../services/supabase';
 
 const BackupRestore = ({ isOpen, onClose }) => {
   const fileInputRef = useRef(null);
@@ -18,6 +26,8 @@ const BackupRestore = ({ isOpen, onClose }) => {
   const [error, setError] = useState('');
   const [backupInfo, setBackupInfo] = useState(null);
   const [pendingRestore, setPendingRestore] = useState(null);
+  const [cloudBackups, setCloudBackups] = useState([]);
+  const [showCloudModal, setShowCloudModal] = useState(false);
 
   async function refreshBackupInfo() {
     const info = await checkBackupExists();
@@ -102,6 +112,37 @@ const BackupRestore = ({ isOpen, onClose }) => {
     }
   };
 
+  const handleCloudBackup = async () => {
+    const result = await runAction('cloud-backup', async () => {
+      const payload = await exportData();
+      return await saveCloudBackup(payload);
+    });
+    if (result?.success) {
+      setMessage('تم رفع النسخة الاحتياطية بنجاح إلى سحابة Supabase.');
+    }
+  };
+
+  const handleCloudRestoreClick = async () => {
+    const backups = await runAction('cloud-list', async () => {
+      return await listCloudBackups(10);
+    });
+    if (!backups || backups.length === 0) {
+      setError('لا توجد نسخ سحابية محفوظة في Supabase حتى الآن أو الجدول غير منشأ.');
+      return;
+    }
+    setCloudBackups(backups);
+    setShowCloudModal(true);
+  };
+
+  const handleSelectCloudItem = (item) => {
+    setShowCloudModal(false);
+    setPendingRestore({
+      type: 'cloud',
+      cloudId: item.id,
+      fileName: `سحابة Supabase (${formatDate(item.created_at)}) - ${item.records_count} سجل`
+    });
+  };
+
   const confirmRestore = async () => {
     if (!pendingRestore) return;
 
@@ -111,6 +152,10 @@ const BackupRestore = ({ isOpen, onClose }) => {
     const result = await runAction('restore', async () => {
       if (restoreSource.type === 'file') {
         return restoreBackupFromText(restoreSource.text);
+      }
+      if (restoreSource.type === 'cloud') {
+        const cloudData = await getCloudBackupById(restoreSource.cloudId);
+        return importData(cloudData);
       }
 
       return restoreBackup();
@@ -238,6 +283,40 @@ const BackupRestore = ({ isOpen, onClose }) => {
               حذف النسخة من الجهاز
             </button>
           )}
+
+          {/* قسم السحابة (Supabase) */}
+          <div className="pt-4 mt-2 border-t border-slate-800 space-y-3">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-bold text-slate-300 flex items-center gap-1.5">
+                <span className="text-sm">☁️</span> النسخ السحابي (Supabase)
+              </span>
+              <span className={`text-[11px] px-2 py-0.5 rounded-full font-bold ${
+                isSupabaseConfigured() ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30' : 'bg-slate-800 text-slate-500'
+              }`}>
+                {isSupabaseConfigured() ? 'سحابة متصلة' : 'غير مهيأ'}
+              </span>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <button
+                onClick={handleCloudBackup}
+                disabled={isBusy || !isSupabaseConfigured()}
+                className="bg-sky-600 hover:bg-sky-500 text-white py-3 px-3 rounded-xl font-bold text-xs disabled:opacity-40 flex items-center justify-center gap-1.5 shadow-lg shadow-sky-600/20 transition-all active:scale-[0.98]"
+              >
+                <span>☁️</span>
+                {loading === 'cloud-backup' ? 'جاري الرفع...' : 'رفع نسخة سحابية'}
+              </button>
+
+              <button
+                onClick={handleCloudRestoreClick}
+                disabled={isBusy || !isSupabaseConfigured()}
+                className="bg-indigo-600 hover:bg-indigo-500 text-white py-3 px-3 rounded-xl font-bold text-xs disabled:opacity-40 flex items-center justify-center gap-1.5 shadow-lg shadow-indigo-600/20 transition-all active:scale-[0.98]"
+              >
+                <span>📥</span>
+                {loading === 'cloud-list' ? 'جاري الفحص...' : 'استرجاع من السحابة'}
+              </button>
+            </div>
+          </div>
         </div>
 
         <input
@@ -277,6 +356,55 @@ const BackupRestore = ({ isOpen, onClose }) => {
                 {loading === 'restore' ? 'جاري...' : 'استعادة'}
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {showCloudModal && (
+        <div className="fixed inset-0 bg-black/90 z-[60] flex items-center justify-center p-4 modal-safe-area" dir="rtl">
+          <div className="bg-slate-900 border border-indigo-500/30 rounded-2xl w-full max-w-md p-6 shadow-2xl">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-bold text-white flex items-center gap-2">
+                <span>☁️</span> النسخ السحابية في Supabase
+              </h3>
+              <button
+                onClick={() => setShowCloudModal(false)}
+                className="w-8 h-8 rounded-full text-slate-400 hover:text-white hover:bg-slate-800 grid place-items-center"
+              >
+                ✕
+              </button>
+            </div>
+
+            <p className="text-slate-400 text-xs mb-4">
+              اختر النسخة السحابية التي تريد استعادتها إلى هذا الجهاز:
+            </p>
+
+            <div className="space-y-2 max-h-64 overflow-y-auto mb-5 pr-1">
+              {cloudBackups.map((item) => (
+                <div
+                  key={item.id}
+                  onClick={() => handleSelectCloudItem(item)}
+                  className="p-3 bg-slate-800/80 hover:bg-slate-800 border border-slate-700/80 hover:border-indigo-500/60 rounded-xl cursor-pointer transition-all flex items-center justify-between"
+                >
+                  <div>
+                    <p className="text-sm font-bold text-white mb-0.5">{formatDate(item.created_at)}</p>
+                    <p className="text-xs text-slate-400">
+                      السجلات: <span className="text-indigo-300 font-mono font-bold">{item.records_count}</span> | الجداول: {item.tables_count}
+                    </p>
+                  </div>
+                  <span className="text-xs bg-indigo-500/20 text-indigo-300 px-2 py-1 rounded-lg font-bold">
+                    استرجاع
+                  </span>
+                </div>
+              ))}
+            </div>
+
+            <button
+              onClick={() => setShowCloudModal(false)}
+              className="w-full py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-sm font-bold"
+            >
+              إغلاق
+            </button>
           </div>
         </div>
       )}

@@ -102,7 +102,7 @@ const parseBackupText = (text) => {
   }
 };
 
-const exportData = async () => {
+export const exportData = async () => {
   const db = await getDatabase();
   const tables = {};
   const counts = {};
@@ -186,7 +186,7 @@ const writeLocalBackup = async (backup) => {
   return Filesystem.stat(getBackupFileOptions());
 };
 
-const importData = async (backup) => {
+export const importData = async (backup) => {
   const validBackup = assertBackupShape(backup);
   const db = await getDatabase();
   const tableColumns = {};
