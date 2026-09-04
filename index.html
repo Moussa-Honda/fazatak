@@ -2,14 +2,30 @@
 <html lang="ar" dir="rtl">
   <head>
     <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+    <title>فزتك - نظام التقسيط والجدولة</title>
+    <meta name="description" content="نظام فزتك المتكامل لإدارة الأقساط والعقود والعملاء والمصروفات" />
     <meta name="theme-color" content="#0f172a" />
+
+    <!-- PWA Web App Manifest -->
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="icon" type="image/png" sizes="192x192" href="/icons/icon-192.png" />
+
+    <!-- iOS / Safari PWA Meta Tags -->
     <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-    <title>نظام التقسيط والجدولة</title>
+    <meta name="apple-mobile-web-app-title" content="فزتك" />
+    <meta name="application-name" content="فزتك" />
+    <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
+    <link rel="apple-touch-icon" sizes="180x180" href="/icons/apple-touch-icon.png" />
+
+    <meta name="format-detection" content="telephone=no" />
   </head>
-  <body>
+  <body class="bg-slate-900 text-slate-100 select-none">
+    <!-- Web SQLite custom element for in-browser IndexedDB persistence -->
+    <jeep-sqlite wasmPath="/assets"></jeep-sqlite>
     <div id="root"></div>
     <script type="module" src="/src/main.jsx"></script>
   </body>

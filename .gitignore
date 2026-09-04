@@ -67,6 +67,12 @@ Thumbs.db
 *.temp
 .cache/
 
-# Sensitive files (auto-detected)
+# Sensitive files and credentials
 dist
 node_modules
+tools/private_key.json
+tools/*.key
+tools/*.pem
+*.key
+*.pem
+*.p8

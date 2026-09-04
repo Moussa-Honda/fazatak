@@ -1,3 +1,4 @@
+import { Capacitor } from '@capacitor/core';
 import { CapacitorSQLite, SQLiteConnection } from '@capacitor-community/sqlite';
 import { notifyDataChanged } from './dataEvents';
 
@@ -111,6 +112,48 @@ const buildInstallmentSchedule = ({ totalAmount, monthlyAmount, installmentCount
 let sqlite = null;
 let db = null;
 let initPromise = null;
+let isWebStore = false;
+
+export const persistWebStore = async () => {
+  if (isWebStore && sqlite) {
+    try {
+      await sqlite.saveToStore({ database: DB_NAME });
+    } catch (e) {
+      console.warn('saveToStore warning (non-fatal):', e);
+    }
+  }
+};
+
+const wrapDbConnection = (rawDb) => {
+  if (!isWebStore || !rawDb || rawDb.__wrapped) return rawDb;
+
+  const originalRun = rawDb.run.bind(rawDb);
+  const originalExecute = rawDb.execute.bind(rawDb);
+  const originalExecuteSet = rawDb.executeSet ? rawDb.executeSet.bind(rawDb) : null;
+
+  rawDb.run = async (...args) => {
+    const res = await originalRun(...args);
+    await persistWebStore();
+    return res;
+  };
+
+  rawDb.execute = async (...args) => {
+    const res = await originalExecute(...args);
+    await persistWebStore();
+    return res;
+  };
+
+  if (originalExecuteSet) {
+    rawDb.executeSet = async (...args) => {
+      const res = await originalExecuteSet(...args);
+      await persistWebStore();
+      return res;
+    };
+  }
+
+  rawDb.__wrapped = true;
+  return rawDb;
+};
 
 export const initDatabase = async () => {
   if (initPromise) return initPromise;
@@ -123,13 +166,24 @@ export const initDatabase = async () => {
     try { await sqlite.checkConnectionsConsistency(); } catch {}
 
     // 2. Identify Platform
-    let platform = 'android';
-    try {
-      const platformResult = await sqlite.getPlatform();
-      platform = platformResult.platform;
-    } catch {}
+    const isNative = Capacitor.isNativePlatform();
+    const platform = isNative ? Capacitor.getPlatform() : 'web';
     
-    if (platform === 'web') {
+    if (platform === 'web' || !isNative) {
+      isWebStore = true;
+      if (typeof document !== 'undefined') {
+        let jeepEl = document.querySelector('jeep-sqlite');
+        if (!jeepEl && document.body) {
+          jeepEl = document.createElement('jeep-sqlite');
+          jeepEl.setAttribute('wasmPath', '/assets');
+          document.body.appendChild(jeepEl);
+        }
+      }
+      if (typeof customElements !== 'undefined') {
+        try {
+          await customElements.whenDefined('jeep-sqlite');
+        } catch {}
+      }
       await sqlite.initWebStore();
     }
     
@@ -163,7 +217,9 @@ export const initDatabase = async () => {
       }
     }
     
+    db = wrapDbConnection(db);
     await createTables();
+    await persistWebStore();
     return db;
     } catch (error) {
       console.error('Database initialization error:', error);
@@ -937,6 +993,30 @@ export const contractService = {
         AND c.customer_id IN (${placeholders})
       `,
       [`-${days} days`, ...ids]
+    );
+
+    return (result.values || []).reduce((map, row) => {
+      map[row.customer_id] = true;
+      return map;
+    }, {});
+  },
+
+  async getPostponedCustomerMap(customerIds = []) {
+    const ids = [...new Set(customerIds.map(id => Number(id)).filter(Boolean))];
+    if (ids.length === 0) return {};
+
+    const database = await getDatabase();
+    const placeholders = ids.map(() => '?').join(',');
+    const result = await database.query(
+      `
+        SELECT DISTINCT c.customer_id
+        FROM contracts c
+        JOIN installments i ON i.contract_id = c.id
+        WHERE c.status = 'active'
+        AND i.status = 'postponed'
+        AND c.customer_id IN (${placeholders})
+      `,
+      ids
     );
 
     return (result.values || []).reduce((map, row) => {

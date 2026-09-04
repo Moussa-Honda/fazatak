@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, Fragment } from 'react';
 import { contractService, installmentService, customerService, settingsService } from '../services/database';
 import { notificationService } from '../services/notificationService';
 import { toHijriDate } from '../utils/dateUtils';
@@ -30,6 +30,17 @@ const isInstallmentPaidForDisplay = (installment) => {
   return status === 'paid' || (Number(installment?.actual_paid || 0) > 0 && getInstallmentRemaining(installment) <= 0.009);
 };
 
+const isInstallmentPostponedForDisplay = (installment) => {
+  const status = String(installment?.status || '').trim().toLowerCase();
+  return status === 'postponed' && !isInstallmentPaidForDisplay(installment);
+};
+
+const getInstallmentStatusGroup = (installment) => {
+  if (isInstallmentPaidForDisplay(installment)) return 'paid';
+  if (isInstallmentPostponedForDisplay(installment)) return 'postponed';
+  return 'active'; // pending or partially paid
+};
+
 const getInstallmentPaidAmount = (installment) => {
   const status = String(installment?.status || '').trim().toLowerCase();
   const actualPaid = Number(installment?.actual_paid || 0);
@@ -51,20 +62,41 @@ const getInstallmentsForDisplay = (items = []) => {
       .map((item, index) => [item.id, index + 1])
   );
 
-  const sortByDueDate = (a, b) => {
-      const dateOrder = String(a.due_date || '').localeCompare(String(b.due_date || ''));
-      if (dateOrder !== 0) return dateOrder;
+  const sortByDueDateAndId = (a, b) => {
+    const dateOrder = String(a.due_date || '').localeCompare(String(b.due_date || ''));
+    if (dateOrder !== 0) return dateOrder;
 
-      return Number(a.id || 0) - Number(b.id || 0);
+    return Number(a.id || 0) - Number(b.id || 0);
   };
 
-  const pending = items.filter(item => !isInstallmentPaidForDisplay(item)).sort(sortByDueDate);
-  const paid = items.filter(item => isInstallmentPaidForDisplay(item)).sort(sortByDueDate);
+  const active = [];
+  const postponed = [];
+  const paid = [];
 
-  return [...pending, ...paid].map((item) => ({
-      ...item,
-      scheduleNumber: scheduleNumbers.get(item.id)
-    }));
+  for (const item of items) {
+    const group = getInstallmentStatusGroup(item);
+    if (group === 'active') {
+      active.push(item);
+    } else if (group === 'postponed') {
+      postponed.push(item);
+    } else {
+      paid.push(item);
+    }
+  }
+
+  // Secondary priority: Due date (oldest first), then ID/schedule number
+  active.sort(sortByDueDateAndId);
+  postponed.sort(sortByDueDateAndId);
+  paid.sort(sortByDueDateAndId);
+
+  // Top Priority: Active (pending & partial)
+  // Bottom Priority: Postponed, then Fully Paid
+  return [...active, ...postponed, ...paid].map((item) => ({
+    ...item,
+    scheduleNumber: scheduleNumbers.get(item.id),
+    statusGroup: getInstallmentStatusGroup(item),
+    isBottomSection: getInstallmentStatusGroup(item) !== 'active'
+  }));
 };
 
 const PostponeModal = ({ isOpen, installment, loading, onClose, onConfirm }) => {
@@ -404,12 +436,15 @@ const ContractList = ({ customerId, isReadOnly, onRenewalRequest, themeColor = '
     }
   };
 
-  const getStatusText = (status) => {
-    switch (status) {
-      case 'paid': return 'مدفوع';
-      case 'postponed': return 'مؤجل';
-      default: return 'معلق';
+  const getStatusText = (status, inst = null) => {
+    if (inst && isInstallmentPaidForDisplay(inst)) return 'مدفوع';
+    if (status === 'paid') return 'مدفوع';
+    if (status === 'postponed') return 'مؤجل';
+    if (inst) {
+      const paidAmount = getInstallmentPaidAmount(inst);
+      if (paidAmount > 0) return 'دفع جزئي';
     }
+    return 'معلق';
   };
 
   const formatAmount = (amount) => {
@@ -597,24 +632,47 @@ const ContractList = ({ customerId, isReadOnly, onRenewalRequest, themeColor = '
                     <h5 className="text-sm font-bold text-slate-400 mb-3">جدول الأقساط</h5>
                     
                     <div className="flex flex-col gap-2">
-                      {getInstallmentsForDisplay(installments[contract.id]).map((inst) => {
-                        const paidAmount = getInstallmentPaidAmount(inst);
-                        const remainingAmount = Math.max(0, getInstallmentRemaining(inst));
-                        const isPaid = isInstallmentPaidForDisplay(inst);
-                        const isPartial = !isPaid && paidAmount > 0;
-                        const primaryAmount = isPaid ? paidAmount : remainingAmount;
+                      {(() => {
+                        const displayList = getInstallmentsForDisplay(installments[contract.id]);
+                        const activeCount = displayList.filter(i => !i.isBottomSection).length;
+                        const bottomCount = displayList.filter(i => i.isBottomSection).length;
+                        const hasBothSections = activeCount > 0 && bottomCount > 0;
+                        let renderedArchiveDivider = false;
 
-                        return (
-                        <div 
-                          key={inst.id}
-                          className="flex flex-col sm:flex-row sm:items-center sm:justify-between bg-slate-900 rounded-lg p-3 gap-3"
-                          style={{ order: isInstallmentPaidForDisplay(inst) ? 1 : 0 }}
-                        >
+                        return displayList.map((inst) => {
+                          const paidAmount = getInstallmentPaidAmount(inst);
+                          const remainingAmount = Math.max(0, getInstallmentRemaining(inst));
+                          const isPaid = isInstallmentPaidForDisplay(inst);
+                          const isPartial = !isPaid && paidAmount > 0;
+                          const primaryAmount = isPaid ? paidAmount : remainingAmount;
+
+                          const showArchiveDivider = hasBothSections && inst.isBottomSection && !renderedArchiveDivider;
+                          if (showArchiveDivider) {
+                            renderedArchiveDivider = true;
+                          }
+
+                          return (
+                            <Fragment key={inst.id}>
+                              {showArchiveDivider && (
+                                <div className="flex items-center gap-2 pt-3 pb-1 text-xs font-semibold text-slate-400">
+                                  <div className="h-px bg-slate-700/80 flex-1"></div>
+                                  <div className="flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-slate-800 border border-slate-700 text-slate-400 text-[11px]">
+                                    <span>📁</span>
+                                    <span>الأرشيف والمنجزات (مؤجل / مدفوع)</span>
+                                    <span className="text-[10px] text-slate-500 font-mono">({bottomCount})</span>
+                                  </div>
+                                  <div className="h-px bg-slate-700/80 flex-1"></div>
+                                </div>
+                              )}
+                              <div
+                                className="flex flex-col sm:flex-row sm:items-center sm:justify-between bg-slate-900 rounded-lg p-3 gap-3"
+                              >
                           <div className="flex items-start gap-3 min-w-0">
                             <span className="text-slate-500 text-xs w-8 pt-1">#{inst.scheduleNumber}</span>
                             <span className={`w-2 h-2 rounded-full ${
-                              inst.status === 'paid' ? 'bg-emerald-500' : 
-                              inst.status === 'postponed' ? 'bg-amber-500' : 'bg-rose-500'
+                              isPaid ? 'bg-emerald-500' :
+                              inst.status === 'postponed' ? 'bg-amber-500' :
+                              isPartial ? 'bg-amber-400' : 'bg-rose-500'
                             } mt-2 shrink-0`} />
                             
                             <div className="min-w-0">
@@ -745,17 +803,21 @@ const ContractList = ({ customerId, isReadOnly, onRenewalRequest, themeColor = '
 
                             <div className="flex flex-col items-center gap-1">
                               <div className={`w-2.5 h-2.5 rounded-full shadow-[0_0_8px] ${
-                                inst.status === 'paid' ? 'bg-emerald-500 shadow-emerald-500/50' : 
-                                inst.status === 'postponed' ? 'bg-amber-500 shadow-amber-500/50' : 'bg-rose-500 shadow-rose-500/50 animate-pulse'
+                                isPaid ? 'bg-emerald-500 shadow-emerald-500/50' :
+                                inst.status === 'postponed' ? 'bg-amber-500 shadow-amber-500/50' :
+                                isPartial ? 'bg-amber-400 shadow-amber-400/50 animate-pulse' :
+                                'bg-rose-500 shadow-rose-500/50 animate-pulse'
                               }`} />
                               <span className="text-[8px] font-bold text-slate-500">
-                                {getStatusText(inst.status)}
+                                {getStatusText(inst.status, inst)}
                               </span>
                             </div>
                           </div>
                         </div>
+                        </Fragment>
                         );
-                      })}
+                      });
+                    })()}
                     </div>
                   </div>
                 </div>

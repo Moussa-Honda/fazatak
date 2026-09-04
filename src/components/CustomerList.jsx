@@ -11,29 +11,31 @@ const sanitizeName = (name) => {
 };
 
 const getCustomerMonthStatusDisplay = (status, managerId = null) => {
+  const baseCard = `bg-[#1e293b]/60 ${managerId ? 'border-indigo-500/30' : 'border-slate-700/50'} shadow-slate-950/20`;
+
   switch (status) {
     case 'paid':
       return {
         label: 'سدد',
-        card: 'bg-emerald-950/60 border-emerald-400/50 shadow-emerald-950/30',
+        card: baseCard,
         badge: 'bg-emerald-400/15 border-emerald-300/40 text-emerald-100'
       };
     case 'postponed':
       return {
         label: 'مؤجل',
-        card: 'bg-amber-950/60 border-amber-400/55 shadow-amber-950/30',
+        card: baseCard,
         badge: 'bg-amber-300/15 border-amber-300/45 text-amber-100'
       };
     case 'overdue':
       return {
-        label: 'غير مسدد',
-        card: 'bg-rose-950/65 border-rose-400/55 shadow-rose-950/30',
-        badge: 'bg-rose-300/15 border-rose-300/45 text-rose-100'
+        label: '',
+        card: baseCard,
+        badge: ''
       };
     default:
       return {
         label: '',
-        card: `bg-[#1e293b]/60 ${managerId ? 'border-indigo-500/30' : 'border-slate-700/50'} shadow-slate-950/20`,
+        card: baseCard,
         badge: ''
       };
   }
@@ -59,6 +61,7 @@ const CustomerList = ({
   const [loading, setLoading] = useState(true);
   const [customerBalances, setCustomerBalances] = useState({});
   const [overdueStatus, setOverdueStatus] = useState({});
+  const [postponedStatus, setPostponedStatus] = useState({});
   const [customerMonthStatuses, setCustomerMonthStatuses] = useState({});
   const [recycleBinEnabled, setRecycleBinEnabled] = useState(false);
   const themeColor = managerId ? 'indigo' : 'blue';
@@ -90,10 +93,11 @@ const CustomerList = ({
       const customerIds = data.map(customer => customer.id);
       const threshold = parseInt(overdueThresholdSetting, 10) || 30;
 
-      const [balanceSummaries, overdueMap, monthStatusMap] = await Promise.all([
+      const [balanceSummaries, overdueMap, monthStatusMap, postponedMap] = await Promise.all([
         contractService.getCustomerBalanceSummaries(customerIds),
         contractService.getOverdueCustomerMap(customerIds, threshold),
-        customerService.getCurrentMonthStatusMap(customerIds)
+        customerService.getCurrentMonthStatusMap(customerIds),
+        contractService.getPostponedCustomerMap(customerIds)
       ]);
 
       // Calculate display values from one grouped read instead of per-customer queries.
@@ -132,6 +136,7 @@ const CustomerList = ({
 
       setCustomerBalances(balances);
       setOverdueStatus(isOverdueMap);
+      setPostponedStatus(postponedMap || {});
       setCustomerMonthStatuses(monthStatusMap);
       setCustomers(data);
     } catch (error) {
@@ -334,6 +339,20 @@ const CustomerList = ({
               const remainingBalance = customerBalances[customer.id] || 0;
               const monthStatus = customer.is_deleted === 1 ? 'none' : (customerMonthStatuses[customer.id] || 'none');
               const monthStatusDisplay = getCustomerMonthStatusDisplay(monthStatus, managerId);
+              const isOverdue = Boolean(
+                customer.is_deleted !== 1 && (
+                  overdueStatus[customer.id] ||
+                  customer.is_manually_flagged_as_overdue ||
+                  monthStatus === 'overdue'
+                )
+              );
+              const hasPostponed = Boolean(
+                customer.is_deleted !== 1 && (
+                  postponedStatus[customer.id] ||
+                  monthStatus === 'postponed'
+                )
+              );
+              const isClean = customer.is_deleted !== 1 && !isOverdue && !hasPostponed;
               
               return (
                 <div
@@ -348,6 +367,31 @@ const CustomerList = ({
                       <h4 className="font-black text-white text-sm truncate min-w-0">
                         {sanitizeName(customer.name)}
                       </h4>
+
+                      {/* Status indicator dots */}
+                      {customer.is_deleted !== 1 && (
+                        <div className="flex items-center gap-1.5 shrink-0" aria-label="حالة الحساب">
+                          {isOverdue && (
+                            <span
+                              className="w-2.5 h-2.5 rounded-full bg-rose-500 shadow-[0_0_8px_rgba(244,63,94,0.8)] animate-pulse"
+                              title="حساب متأخر"
+                            />
+                          )}
+                          {hasPostponed && (
+                            <span
+                              className="w-2.5 h-2.5 rounded-full bg-amber-400 shadow-[0_0_8px_rgba(251,191,36,0.8)]"
+                              title="أقساط مؤجلة"
+                            />
+                          )}
+                          {isClean && (
+                            <span
+                              className="w-2.5 h-2.5 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.8)]"
+                              title="حساب غير متأخر"
+                            />
+                          )}
+                        </div>
+                      )}
+
                       {monthStatusDisplay.label && (
                         <span className={`shrink-0 px-2 py-0.5 rounded-full border text-[10px] font-black ${monthStatusDisplay.badge}`}>
                           {monthStatusDisplay.label}
@@ -359,8 +403,8 @@ const CustomerList = ({
                         محذوف منذ: {customer.deleted_at ? customer.deleted_at.split(' ')[0] : 'غير معروف'}
                       </p>
                     ) : remainingBalance > 0 && (
-                      <p className="text-rose-500 text-xs font-bold mt-1">
-                        متبقي: {Math.round(remainingBalance).toLocaleString('en-US')}
+                      <p className="text-slate-400 text-xs font-medium mt-1">
+                        متبقي: <span className="text-white font-bold">{Math.round(remainingBalance).toLocaleString('en-US')} ر.س</span>
                       </p>
                     )}
                   </div>

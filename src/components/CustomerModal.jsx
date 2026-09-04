@@ -60,6 +60,26 @@ const CustomerModal = ({ isOpen, onClose, onSave, customer = null, managerId = n
 
   const pickFromContacts = async () => {
     try {
+      if ('contacts' in navigator && 'ContactsManager' in window) {
+        try {
+          const props = ['name', 'tel'];
+          const contacts = await navigator.contacts.select(props, { multiple: false });
+          if (contacts && contacts.length > 0) {
+            const c = contacts[0];
+            const name = c.name?.[0] || '';
+            const phone = c.tel?.[0] || '';
+            setFormData(prev => ({
+              ...prev,
+              name: name || prev.name,
+              phone: sanitizePhoneNumber(phone) || prev.phone
+            }));
+            return;
+          }
+        } catch (e) {
+          if (e.name === 'AbortError') return;
+        }
+      }
+
       const { Contacts } = await import('@capacitor-community/contacts');
       
       const result = await Contacts.pickContact({
@@ -81,8 +101,8 @@ const CustomerModal = ({ isOpen, onClose, onSave, customer = null, managerId = n
         }));
       }
     } catch (error) {
-      console.error('Contacts error:', error);
-      alert('تعذر فتح جهات الاتصال. تأكد من منح الإذن للتطبيق.');
+      console.warn('Contacts error:', error);
+      alert('ميزة جلب الأسماء من جهات الاتصال تتطلب متصفحاً يدعم الوصول أو تشغيل التطبيق المثبت.');
     }
   };
 

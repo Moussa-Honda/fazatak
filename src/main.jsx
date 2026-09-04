@@ -1,22 +1,73 @@
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
+import { defineCustomElements as jeepSqlite } from 'jeep-sqlite/loader'
 import { initDatabase } from './services/database.js'
 import './index.css'
 import App from './App.jsx'
 
-// Initialize database before rendering
-initDatabase().then(() => {
-  createRoot(document.getElementById('root')).render(
-    <StrictMode>
-      <App />
-    </StrictMode>,
-  )
-}).catch(err => {
-  console.error('Failed to initialize database:', err)
-  createRoot(document.getElementById('root')).render(
-    <div className="flex items-center justify-center h-screen bg-dark-900 text-white p-8 text-center">
-      <h1>خطأ في تهيئة قاعدة البيانات</h1>
-      <p>{err.message}</p>
-    </div>
-  )
-})
+// Register jeep-sqlite web component for in-browser SQLite WebAssembly
+jeepSqlite(window)
+
+// Register Service Worker for Offline PWA
+if ('serviceWorker' in navigator && window.location.protocol.startsWith('http')) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('/sw.js').catch((err) => {
+      console.warn('[SW] Registration failed:', err)
+    })
+  })
+}
+
+const mountApp = async () => {
+  try {
+    // Ensure jeep-sqlite element is attached and defined before initDatabase
+    if (typeof document !== 'undefined') {
+      let jeepEl = document.querySelector('jeep-sqlite')
+      if (!jeepEl && document.body) {
+        jeepEl = document.createElement('jeep-sqlite')
+        jeepEl.setAttribute('wasmPath', '/assets')
+        document.body.appendChild(jeepEl)
+      }
+    }
+    if (typeof customElements !== 'undefined') {
+      try {
+        await customElements.whenDefined('jeep-sqlite')
+      } catch {}
+    }
+
+    await initDatabase()
+
+    const rootEl = document.getElementById('root')
+    if (rootEl) {
+      createRoot(rootEl).render(
+        <StrictMode>
+          <App />
+        </StrictMode>,
+      )
+    }
+  } catch (err) {
+    console.error('Failed to initialize database:', err)
+    const rootEl = document.getElementById('root')
+    if (rootEl) {
+      createRoot(rootEl).render(
+        <div className="flex items-center justify-center h-screen bg-slate-900 text-white p-8 text-center font-sans" dir="rtl">
+          <div className="bg-slate-800 p-6 rounded-2xl border border-slate-700 max-w-md w-full shadow-2xl">
+            <h1 className="text-xl font-bold text-rose-400 mb-2">خطأ في تهيئة قاعدة البيانات</h1>
+            <p className="text-slate-300 text-sm mb-4">{err.message || 'تعذر تشغيل محرك البيانات'}</p>
+            <button
+              onClick={() => window.location.reload()}
+              className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 rounded-xl text-white font-medium text-sm transition-colors"
+            >
+              إعادة المحاولة
+            </button>
+          </div>
+        </div>
+      )
+    }
+  }
+}
+
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', mountApp)
+} else {
+  mountApp()
+}

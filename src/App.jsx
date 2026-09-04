@@ -4,6 +4,7 @@ import LicenseGate from './components/LicenseGate';
 import licenseService from './services/license';
 import { settingsService } from './services/database';
 import { notificationService } from './services/notificationService';
+import { Capacitor } from '@capacitor/core';
 import { PrivacyScreen } from '@capacitor-community/privacy-screen';
 import './index.css';
 
@@ -28,6 +29,8 @@ function App() {
   }, [isLicensed]);
 
   const initScreenPrivacy = async () => {
+    if (!Capacitor.isNativePlatform()) return;
+
     try {
       const isEnabled = await settingsService.get('screen_privacy');
       if (isEnabled === 'false') {
@@ -53,7 +56,6 @@ function App() {
       if (err.message === 'ERR_EXPIRED') {
         setIsLicensed(true);
         setIsExpired(true);
-        // We might still want to show expiry even if expired
         try {
           const status = await licenseService.checkLicenseStatus();
           setExpiry(status.expiry);

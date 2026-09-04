@@ -1,3 +1,4 @@
+import { Capacitor } from '@capacitor/core';
 import { Filesystem, Directory, Encoding } from '@capacitor/filesystem';
 import { Share } from '@capacitor/share';
 import { getDatabase } from './database';
@@ -131,6 +132,12 @@ const exportData = async () => {
 };
 
 const readLocalBackupText = async () => {
+  if (!Capacitor.isNativePlatform()) {
+    const cached = localStorage.getItem('fazatak_web_backup_cache');
+    if (!cached) throw new Error('لا توجد نسخة احتياطية محفوظة محلياً');
+    return cached;
+  }
+
   const file = await Filesystem.readFile({
     ...getBackupFileOptions(),
     encoding: Encoding.UTF8
@@ -152,6 +159,13 @@ const verifySavedBackup = (sourceBackup, savedBackup) => {
 
 const writeLocalBackup = async (backup) => {
   const jsonString = JSON.stringify(backup, null, 2);
+
+  if (!Capacitor.isNativePlatform()) {
+    localStorage.setItem('fazatak_web_backup_cache', jsonString);
+    const savedBackup = parseBackupText(jsonString);
+    verifySavedBackup(backup, savedBackup);
+    return { size: jsonString.length, mtime: Date.now() };
+  }
 
   try {
     await Filesystem.requestPermissions();
@@ -256,15 +270,18 @@ const importData = async (backup) => {
 const downloadBackupInBrowser = async () => {
   if (typeof document === 'undefined') return false;
 
-  const backupText = await readLocalBackupText();
+  const backup = await exportData();
+  const backupText = JSON.stringify(backup, null, 2);
   const blob = new Blob([backupText], { type: 'application/json' });
   const url = URL.createObjectURL(blob);
   const link = document.createElement('a');
 
   link.href = url;
   link.download = BACKUP_FILE_NAME;
+  document.body.appendChild(link);
   link.click();
-  URL.revokeObjectURL(url);
+  document.body.removeChild(link);
+  setTimeout(() => URL.revokeObjectURL(url), 5000);
 
   return true;
 };
@@ -292,6 +309,34 @@ export const createBackup = async () => {
 export const shareBackup = async () => {
   try {
     const backup = await createBackup();
+
+    if (!Capacitor.isNativePlatform()) {
+      const jsonString = JSON.stringify(backup, null, 2);
+      const file = new File([jsonString], BACKUP_FILE_NAME, { type: 'application/json' });
+      if (navigator.canShare && navigator.canShare({ files: [file] })) {
+        try {
+          await navigator.share({
+            title: BACKUP_FILE_NAME,
+            text: 'نسخة احتياطية من بيانات فزتك',
+            files: [file]
+          });
+          return {
+            ...backup,
+            shared: true
+          };
+        } catch (err) {
+          if (err.name === 'AbortError') return { ...backup, shared: true };
+        }
+      }
+
+      const downloaded = await downloadBackupInBrowser();
+      return {
+        ...backup,
+        shared: false,
+        downloaded: Boolean(downloaded)
+      };
+    }
+
     const { uri } = await Filesystem.getUri(getBackupFileOptions());
     const canShare = await Share.canShare().catch(() => ({ value: false }));
 
@@ -308,7 +353,7 @@ export const shareBackup = async () => {
 
     await Share.share({
       title: BACKUP_FILE_NAME,
-      text: 'نسخة احتياطية من بيانات فزعتك',
+      text: 'نسخة احتياطية من بيانات فزتك',
       url: uri,
       files: [uri],
       dialogTitle: 'مشاركة النسخة الاحتياطية'

@@ -1,5 +1,6 @@
 import { jsPDF } from 'jspdf';
 import html2canvas from 'html2canvas';
+import { Capacitor } from '@capacitor/core';
 import { Share } from '@capacitor/share';
 import { Filesystem, Directory } from '@capacitor/filesystem';
 import { settingsService, installmentService, managerService } from '../services/database';
@@ -395,6 +396,38 @@ const renderHTMLtoPDF = async (htmlString) => {
 
 // ─── Save & Share ─────────────────────────────────────────────────────────────
 const saveAndShare = async (doc, fileName) => {
+  const blob = doc.output('blob');
+
+  if (!Capacitor.isNativePlatform()) {
+    const file = new File([blob], fileName, { type: 'application/pdf' });
+    if (navigator.canShare && navigator.canShare({ files: [file] })) {
+      try {
+        await navigator.share({
+          title: fileName,
+          text: fileName,
+          files: [file]
+        });
+        return true;
+      } catch (err) {
+        if (err.name === 'AbortError' || err.message?.includes('canceled') || err.message?.includes('cancelled')) {
+          return true;
+        }
+      }
+    }
+
+    // Web fallback: download / view in browser
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = fileName;
+    link.target = '_blank';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    setTimeout(() => URL.revokeObjectURL(url), 5000);
+    return true;
+  }
+
   const b64 = doc.output('datauristring').split(',')[1];
   await Filesystem.writeFile({ path: fileName, data: b64, directory: Directory.Documents });
   const { uri } = await Filesystem.getUri({ path: fileName, directory: Directory.Documents });
