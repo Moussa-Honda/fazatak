@@ -1,18 +1,50 @@
 import { createClient } from '@supabase/supabase-js';
 
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-const supabaseKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY || import.meta.env.VITE_SUPABASE_ANON_KEY;
+const sanitizeSupabaseUrl = (url) => {
+  if (!url || typeof url !== 'string') return null;
+  const trimmed = url.trim();
+  if (!trimmed) return null;
 
-export const isSupabaseConfigured = () => Boolean(supabaseUrl && supabaseKey);
+  // Auto-prepend https:// if protocol was omitted
+  const withProtocol = (!trimmed.startsWith('http://') && !trimmed.startsWith('https://'))
+    ? `https://${trimmed}`
+    : trimmed;
 
-export const supabase = isSupabaseConfigured()
-  ? createClient(supabaseUrl, supabaseKey, {
+  try {
+    const parsed = new URL(withProtocol);
+    if (parsed.protocol === 'http:' || parsed.protocol === 'https:') {
+      return parsed.origin;
+    }
+  } catch {
+    return null;
+  }
+  return null;
+};
+
+const rawUrl = import.meta.env.VITE_SUPABASE_URL;
+const rawKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY || import.meta.env.VITE_SUPABASE_ANON_KEY;
+
+const supabaseUrl = sanitizeSupabaseUrl(rawUrl);
+const supabaseKey = (rawKey && typeof rawKey === 'string') ? rawKey.trim() : null;
+
+export const isSupabaseConfigured = () => Boolean(supabaseUrl && supabaseKey && supabaseKey.length > 10);
+
+let client = null;
+if (isSupabaseConfigured()) {
+  try {
+    client = createClient(supabaseUrl, supabaseKey, {
       auth: {
         persistSession: true,
         autoRefreshToken: true
       }
-    })
-  : null;
+    });
+  } catch (err) {
+    console.warn('[Supabase] Failed to initialize Supabase client:', err);
+    client = null;
+  }
+}
+
+export const supabase = client;
 
 /**
  * اختبار الاتصال بمشروع Supabase

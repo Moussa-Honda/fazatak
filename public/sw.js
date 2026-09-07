@@ -1,4 +1,4 @@
-const CACHE_NAME = 'fazatak-cache-v1.0.1';
+const CACHE_NAME = 'fazatak-cache-v1.0.2';
 
 const PRECACHE_ASSETS = [
   '/',
@@ -98,9 +98,6 @@ self.addEventListener('fetch', (event) => {
             caches.open(CACHE_NAME).then((cache) => cache.put(request, copy));
           }
           return networkResponse;
-        }).catch((err) => {
-          console.warn('[SW] Fetch failed for:', request.url, err);
-          return null;
         });
       })
     );
