@@ -2,8 +2,15 @@ import { createClient } from '@supabase/supabase-js';
 
 const sanitizeSupabaseUrl = (url) => {
   if (!url || typeof url !== 'string') return null;
-  const trimmed = url.trim();
+  let trimmed = url.trim();
   if (!trimmed) return null;
+
+  // Extract from markdown link if pasted as [url](url) or similar
+  const markdownMatch = trimmed.match(/\((https?:\/\/[^\)]+)\)/) || trimmed.match(/\[(https?:\/\/[^\]]+)\]/);
+  if (markdownMatch) {
+    trimmed = markdownMatch[1];
+  }
+  trimmed = trimmed.replace(/[\[\]\(\)\s]/g, '');
 
   // Auto-prepend https:// if protocol was omitted
   const withProtocol = (!trimmed.startsWith('http://') && !trimmed.startsWith('https://'))
@@ -21,6 +28,12 @@ const sanitizeSupabaseUrl = (url) => {
   return null;
 };
 
+const sanitizeSupabaseKey = (key) => {
+  if (!key || typeof key !== 'string') return null;
+  const cleaned = key.trim().replace(/[\[\]\(\)\`\'\"\s]/g, '');
+  return cleaned.length > 10 ? cleaned : null;
+};
+
 const DEFAULT_SUPABASE_URL = 'https://ehufhgulrubgnntmdhxn.supabase.co';
 const DEFAULT_SUPABASE_KEY = 'sb_publishable_5O9wP_WCo3zqIkNzI_8Cpg_hYFM9NGC';
 
@@ -28,7 +41,7 @@ const rawUrl = import.meta.env.VITE_SUPABASE_URL || DEFAULT_SUPABASE_URL;
 const rawKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY || import.meta.env.VITE_SUPABASE_ANON_KEY || DEFAULT_SUPABASE_KEY;
 
 const supabaseUrl = sanitizeSupabaseUrl(rawUrl);
-const supabaseKey = (rawKey && typeof rawKey === 'string') ? rawKey.trim() : null;
+const supabaseKey = sanitizeSupabaseKey(rawKey);
 
 export const isSupabaseConfigured = () => Boolean(supabaseUrl && supabaseKey && supabaseKey.length > 10);
 
