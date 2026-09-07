@@ -142,7 +142,34 @@ export const licenseService = {
       }
     }
 
-    // Web license status check
+    // 1. First check if a user is logged in via Phone Account
+    try {
+      const authRaw = localStorage.getItem('fazatak_auth_user');
+      if (authRaw) {
+        const user = JSON.parse(authRaw);
+        if (user && user.subscription_expiry) {
+          const expiryMs = new Date(user.subscription_expiry).getTime();
+          const isExpired = expiryMs < Date.now() || user.subscription_status === 'expired';
+
+          if (isExpired) {
+            throw new Error('ERR_EXPIRED');
+          }
+
+          return {
+            isValid: true,
+            expiry: Math.floor(expiryMs / 1000),
+            key: 'FAZATAK_SECURE_KEY',
+            user
+          };
+        }
+      }
+    } catch (err) {
+      if (err.message && err.message.includes('ERR_EXPIRED')) {
+        throw err;
+      }
+    }
+
+    // 2. Fall back to legacy web license status check
     try {
       const stored = localStorage.getItem(WEB_LICENSE_KEY);
       if (!stored) {

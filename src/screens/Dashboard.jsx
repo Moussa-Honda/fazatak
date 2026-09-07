@@ -4,6 +4,7 @@ import { useLiveRefresh } from '../hooks/useLiveRefresh';
 import CustomerList from '../components/CustomerList';
 import ContractList from '../components/ContractList';
 import Settings from '../components/Settings';
+import AuthGate from '../components/AuthGate';
 import LicenseGate from '../components/LicenseGate';
 import CustodyList from '../components/CustodyList';
 import CustodyDetails from '../components/CustodyDetails';
@@ -202,7 +203,7 @@ const AlertDetailsModal = ({ type, items, onClose, onOpenCustomer, onSendWhatsAp
   );
 };
 
-const Dashboard = ({ isExpired, expiry, onReActivate }) => {
+const Dashboard = ({ isExpired, expiry, onReActivate, currentUser, onLogout }) => {
   const greeting = useGreeting();
   const { stats } = useManagerStats();
   const [activeTab, setActiveTab] = useState('dashboard');
@@ -366,7 +367,13 @@ const Dashboard = ({ isExpired, expiry, onReActivate }) => {
                   {greeting}
                   <span className="text-[10px] bg-blue-500 text-white px-2 py-0.5 rounded-full ml-2 align-middle">v2.0</span>
                 </h1>
-                <p className="text-slate-400">نظرة عامة على أداء عملك اليوم</p>
+                <p className="text-slate-400 text-xs">
+                  {currentUser?.name ? (
+                    <span className="text-emerald-400 font-medium">حساب: {currentUser.name} ({currentUser.phone})</span>
+                  ) : (
+                    'نظرة عامة على أداء عملك اليوم'
+                  )}
+                </p>
               </div>
               {remainingText && (
                 <div className={`px-3 py-1.5 rounded-full text-[10px] font-bold flex items-center gap-1.5 border shadow-sm ${
@@ -574,6 +581,8 @@ const Dashboard = ({ isExpired, expiry, onReActivate }) => {
           onRenewalRequest={() => setShowRenewal(true)} 
           onSettingsChange={loadHomeAlerts}
           onLicenseRenewed={onReActivate}
+          currentUser={currentUser}
+          onLogout={onLogout}
         />;
 
       default:
@@ -649,19 +658,20 @@ const Dashboard = ({ isExpired, expiry, onReActivate }) => {
       {showRenewal && (
         <div className="fixed inset-0 z-[10000] flex items-center justify-center modal-safe-area">
           <div className="absolute inset-0 bg-black/80 backdrop-blur-sm" onClick={() => setShowRenewal(false)} />
-          <div className="relative w-full max-w-sm mx-4">
+          <div className="relative w-full max-w-md mx-4">
             <button
               onClick={() => setShowRenewal(false)}
-              className="absolute -top-12 right-0 text-white/60 hover:text-white transition-colors"
+              className="absolute -top-10 left-2 text-white/70 hover:text-white transition-colors text-xs font-bold bg-slate-800 px-3 py-1.5 rounded-lg z-10"
             >
-              إغلاق [X]
+              إغلاق [✕]
             </button>
-            <LicenseGate
-              onActivated={() => {
+            <AuthGate
+              isExpired={true}
+              initialUser={currentUser}
+              onAuthenticated={() => {
                 setShowRenewal(false);
                 onReActivate?.();
               }}
-              isModal={true}
             />
           </div>
         </div>

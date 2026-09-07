@@ -6,6 +6,7 @@ import { PrivacyScreen } from '@capacitor-community/privacy-screen';
 import { Clipboard } from '@capacitor/clipboard';
 import BackupRestore from './BackupRestore';
 import { useLiveRefresh } from '../hooks/useLiveRefresh';
+import { cloudSyncService } from '../services/cloudSyncService';
 
 const SUPPORT_PHONE_DISPLAY = '+966556854162';
 const SUPPORT_WHATSAPP_PHONE = '966556854162';
@@ -29,7 +30,30 @@ const ToggleItem = ({ title, description, value, onToggle, icon }) => (
   </div>
 );
 
-const Settings = ({ onSettingsChange, onLicenseRenewed }) => {
+const Settings = ({ onSettingsChange, onLicenseRenewed, currentUser, onLogout }) => {
+  const [syncLoading, setSyncLoading] = useState(false);
+  const [syncStatus, setSyncStatus] = useState('');
+
+  const handleCloudSync = async () => {
+    if (!currentUser?.phone) {
+      setSyncStatus('لا يوجد حساب مسجل للمزامنة السحابية');
+      return;
+    }
+    setSyncLoading(true);
+    setSyncStatus('جاري رفع ومزامنة كافة المعاملات إلى السحابة...');
+    try {
+      const res = await cloudSyncService.backupUserToCloud(currentUser.phone);
+      if (res.success) {
+        setSyncStatus(`تمت المزامنة بنجاح! تم حفظ ${res.recordsCount} سجل في حسابك السحابي.`);
+      } else {
+        setSyncStatus(`تعذر المزامنة: ${res.error || 'تحقق من اتصال الإنترنت'}`);
+      }
+    } catch (err) {
+      setSyncStatus(`خطأ في المزامنة: ${err.message}`);
+    } finally {
+      setSyncLoading(false);
+    }
+  };
   const [quickPaymentMode, setQuickPaymentMode] = useState(false);
   const [privacyMode, setPrivacyMode] = useState(false);
   const [screenPrivacy, setScreenPrivacy] = useState(true);
@@ -252,6 +276,75 @@ const Settings = ({ onSettingsChange, onLicenseRenewed }) => {
 
   return (
     <div className="p-4 space-y-6 overflow-y-auto custom-scrollbar h-full bg-slate-900 pb-20" style={{ paddingTop: 'calc(env(safe-area-inset-top, 0px) + 16px)' }}>
+      
+      {/* ── Client Account & Cloud Sync Section ── */}
+      {currentUser && (
+        <div className="bg-gradient-to-br from-slate-800 to-slate-900 rounded-2xl p-5 border border-emerald-500/30 shadow-lg relative overflow-hidden">
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center gap-3">
+              <div className="w-12 h-12 rounded-2xl bg-emerald-500/20 border border-emerald-500/30 flex items-center justify-center text-2xl">
+                👤
+              </div>
+              <div>
+                <h3 className="text-base font-bold text-white">{currentUser.name}</h3>
+                <p className="text-emerald-400 font-mono text-xs mt-0.5" dir="ltr">{currentUser.phone}</p>
+              </div>
+            </div>
+            {onLogout && (
+              <button
+                type="button"
+                onClick={onLogout}
+                className="px-3 py-1.5 bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/30 rounded-xl text-xs font-bold transition-colors"
+              >
+                تسجيل الخروج
+              </button>
+            )}
+          </div>
+
+          <div className="bg-slate-950/60 rounded-xl p-3 border border-slate-800 space-y-2 mb-4 text-xs">
+            <div className="flex justify-between items-center">
+              <span className="text-slate-400">حالة الاشتراك السحابي:</span>
+              <span className="px-2.5 py-0.5 rounded-full font-bold text-[11px] bg-emerald-500/20 text-emerald-400 border border-emerald-500/40">
+                {currentUser.subscription_status === 'trial' ? 'فترة تجريبية سارية' : 'اشتراك نشط'}
+              </span>
+            </div>
+            {currentUser.subscription_expiry && (
+              <div className="flex justify-between items-center">
+                <span className="text-slate-400">تاريخ انتهاء الاشتراك:</span>
+                <span className="text-slate-200 font-mono font-medium">
+                  {new Date(currentUser.subscription_expiry).toLocaleDateString('ar-EG')}
+                </span>
+              </div>
+            )}
+          </div>
+
+          <button
+            type="button"
+            disabled={syncLoading}
+            onClick={handleCloudSync}
+            className="w-full py-3 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white rounded-xl font-bold text-xs shadow-md transition-all flex items-center justify-center gap-2"
+          >
+            {syncLoading ? (
+              <>
+                <div className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                <span>جاري المزامنة مع السحابة...</span>
+              </>
+            ) : (
+              <>
+                <span>☁️</span>
+                <span>مزامنة المعاملات سحابياً الآن</span>
+              </>
+            )}
+          </button>
+
+          {syncStatus && (
+            <p className="mt-3 text-xs text-center text-slate-300 bg-slate-950/60 p-2 rounded-lg border border-slate-800">
+              {syncStatus}
+            </p>
+          )}
+        </div>
+      )}
+
       {/* License Section */}
       <div className="bg-slate-800 rounded-2xl p-6 border border-slate-700 shadow-sm">
         <h3 className="text-lg font-bold text-white mb-4 flex items-center gap-2">الاشتراك والجهاز</h3>
