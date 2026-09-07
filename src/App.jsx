@@ -90,18 +90,10 @@ function App() {
         return;
       }
 
-      // 2. فحص حالة الترخيص البديلة
-      const status = await licenseService.checkLicenseStatus();
-      if (status.isValid) {
-        setIsLicensed(true);
-        setIsExpired(false);
-        setExpiry(status.expiry);
-        setDecryptionKey(status.key || 'FAZATAK_SECURE_KEY');
-        if (status.user) setCurrentUser(status.user);
-      } else {
-        setIsLicensed(false);
-        setIsExpired(false);
-      }
+      // 2. إذا لم يكن مسجلاً برقم الهاتف، يجب تسجيل الدخول أو إنشاء حساب
+      setIsLicensed(false);
+      setIsExpired(false);
+      setCurrentUser(null);
     } catch (err) {
       if (err.message === 'ERR_EXPIRED') {
         setIsLicensed(false);
