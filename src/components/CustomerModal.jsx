@@ -1,6 +1,8 @@
 import { useState, useEffect } from 'react';
 import { customerService } from '../services/database';
 import { sanitizePhoneNumber } from '../utils/phoneUtils';
+import { isWebContactsSupported, isNativePlatform, pickContactDirectly } from '../services/contactService';
+import ContactPickerModal from './ContactPickerModal';
 
 const CustomerModal = ({ isOpen, onClose, onSave, customer = null, managerId = null, themeColor = 'blue' }) => {
   const themeBg = themeColor === 'indigo' ? 'bg-indigo-600' : 'bg-blue-600';
@@ -14,6 +16,7 @@ const CustomerModal = ({ isOpen, onClose, onSave, customer = null, managerId = n
     manager_id: managerId
   });
   const [loading, setLoading] = useState(false);
+  const [showContactPicker, setShowContactPicker] = useState(false);
 
   useEffect(() => {
     if (customer) {
@@ -58,84 +61,76 @@ const CustomerModal = ({ isOpen, onClose, onSave, customer = null, managerId = n
     }
   };
 
-  const pickFromContacts = async () => {
-    try {
-      if ('contacts' in navigator && 'ContactsManager' in window) {
-        try {
-          const props = ['name', 'tel'];
-          const contacts = await navigator.contacts.select(props, { multiple: false });
-          if (contacts && contacts.length > 0) {
-            const c = contacts[0];
-            const name = c.name?.[0] || '';
-            const phone = c.tel?.[0] || '';
-            setFormData(prev => ({
-              ...prev,
-              name: name || prev.name,
-              phone: sanitizePhoneNumber(phone) || prev.phone
-            }));
-            return;
-          }
-        } catch (e) {
-          if (e.name === 'AbortError') return;
+  const handlePickContact = async () => {
+    if (isWebContactsSupported() || isNativePlatform()) {
+      try {
+        const result = await pickContactDirectly();
+        if (result && !result.unsupported) {
+          setFormData(prev => ({
+            ...prev,
+            name: result.name || prev.name,
+            phone: result.phone || prev.phone
+          }));
+          return;
         }
+      } catch (e) {
+        console.warn('Direct pick failed, opening contacts modal:', e);
       }
-
-      const { Contacts } = await import('@capacitor-community/contacts');
-      
-      const result = await Contacts.pickContact({
-        projection: {
-          name: true,
-          phones: true
-        }
-      });
-      
-      if (result.contact) {
-        const contact = result.contact;
-        const rawPhone = contact.phones?.[0]?.number || '';
-        const sanitizedPhone = sanitizePhoneNumber(rawPhone);
-        
-        setFormData(prev => ({
-          ...prev,
-          name: contact.name?.display || prev.name,
-          phone: sanitizedPhone
-        }));
-      }
-    } catch (error) {
-      console.warn('Contacts error:', error);
-      alert('ميزة جلب الأسماء من جهات الاتصال تتطلب متصفحاً يدعم الوصول أو تشغيل التطبيق المثبت.');
     }
+    // في حال عدم توفر الوصول المباشر (مثل iPhone iOS PWA أو متصفح الكمبيوتر)
+    setShowContactPicker(true);
+  };
+
+  const handleContactSelected = (contact) => {
+    if (!contact) return;
+    setFormData(prev => ({
+      ...prev,
+      name: contact.name || prev.name,
+      phone: contact.phone || prev.phone
+    }));
   };
 
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 modal-safe-area">
-      <div className="bg-slate-800 rounded-2xl w-full max-w-md overflow-hidden max-h-[90dvh] flex flex-col">
-        <div className={`${themeColor === 'indigo' ? 'bg-indigo-900/50' : 'bg-slate-700'} px-6 py-4 flex justify-between items-center shrink-0`}>
-          <h3 className="text-lg font-bold text-white">
-            {customer ? 'تعديل عميل' : 'إضافة عميل جديد'}
-          </h3>
-          <button 
-            onClick={onClose}
-            className="text-slate-400 hover:text-white transition-colors"
-          >
-            ✕
-          </button>
-        </div>
-
-        <form onSubmit={handleSubmit} className="p-6 space-y-4 overflow-y-auto custom-scrollbar">
-          {!customer && (
-            <button
-              type="button"
-              onClick={pickFromContacts}
-              className="w-full bg-blue-600/20 border border-blue-500/50 text-blue-400 py-3 rounded-xl font-medium btn-press flex items-center justify-center gap-2 hover:bg-blue-600/30 transition-colors"
+    <>
+      <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 modal-safe-area">
+        <div className="bg-slate-800 rounded-2xl w-full max-w-md overflow-hidden max-h-[90dvh] flex flex-col">
+          <div className={`${themeColor === 'indigo' ? 'bg-indigo-900/50' : 'bg-slate-700'} px-6 py-4 flex justify-between items-center shrink-0`}>
+            <h3 className="text-lg font-bold text-white">
+              {customer ? 'تعديل عميل' : 'إضافة عميل جديد'}
+            </h3>
+            <button 
+              onClick={onClose}
+              className="text-slate-400 hover:text-white transition-colors"
             >
-              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197m13.5-9a2.5 2.5 0 11-5 0 2.5 2.5 0 015 0z" />
-              </svg>
-              اختيار من جهات الاتصال
+              ✕
             </button>
-          )}
+          </div>
+
+          <form onSubmit={handleSubmit} className="p-6 space-y-4 overflow-y-auto custom-scrollbar">
+            {!customer && (
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={handlePickContact}
+                  className="flex-1 bg-blue-600/20 border border-blue-500/50 text-blue-400 py-3 rounded-xl font-medium btn-press flex items-center justify-center gap-2 hover:bg-blue-600/30 transition-colors"
+                >
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197m13.5-9a2.5 2.5 0 11-5 0 2.5 2.5 0 015 0z" />
+                  </svg>
+                  اختيار من جهات الاتصال
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowContactPicker(true)}
+                  title="خيارات استرداد متقدمة (ملف VCF أو لصق ذكي)"
+                  className="p-3 bg-slate-700/80 hover:bg-slate-700 border border-slate-600 text-slate-300 hover:text-white rounded-xl transition-colors shrink-0"
+                >
+                  <span className="text-lg leading-none">📂</span>
+                </button>
+              </div>
+            )}
 
           <div>
             <label className="block text-sm text-slate-400 mb-2">اسم العميل</label>
@@ -202,6 +197,15 @@ const CustomerModal = ({ isOpen, onClose, onSave, customer = null, managerId = n
         </form>
       </div>
     </div>
+
+    {/* نافذة استرداد جهات الاتصال الذكية للـ PWA */}
+    <ContactPickerModal
+      isOpen={showContactPicker}
+      onClose={() => setShowContactPicker(false)}
+      onSelectContact={handleContactSelected}
+      title="استرداد بيانات العميل من جهات الاتصال"
+    />
+  </>
   );
 };
 

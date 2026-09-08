@@ -3,6 +3,8 @@ import { contractService, installmentService, customerService, settingsService }
 import { notificationService } from '../services/notificationService';
 import { getDefaultDueDate } from '../utils/dateUtils';
 import { sanitizePhoneNumber } from '../utils/phoneUtils';
+import { isWebContactsSupported, isNativePlatform, pickContactDirectly } from '../services/contactService';
+import ContactPickerModal from './ContactPickerModal';
 
 const getPaidAmount = (installment) => {
   const actualPaid = Number(installment?.actual_paid || 0);
@@ -31,7 +33,36 @@ const ContractModal = ({ isOpen, onClose, onSave, customerId, customerName, isBl
   const [customerCreditScore, setCustomerCreditScore] = useState('A');
   const [enableReschedule, setEnableReschedule] = useState(false);
   const [paidCredit, setPaidCredit] = useState(0);
+  const [showGuarantorPicker, setShowGuarantorPicker] = useState(false);
   const isEditing = Boolean(contract?.id);
+
+  const handlePickGuarantorContact = async () => {
+    if (isWebContactsSupported() || isNativePlatform()) {
+      try {
+        const result = await pickContactDirectly();
+        if (result && !result.unsupported) {
+          setFormData(prev => ({
+            ...prev,
+            guarantor_name: result.name || prev.guarantor_name,
+            guarantor_phone: result.phone || prev.guarantor_phone
+          }));
+          return;
+        }
+      } catch (e) {
+        console.warn('Direct pick guarantor failed:', e);
+      }
+    }
+    setShowGuarantorPicker(true);
+  };
+
+  const handleGuarantorSelected = (contact) => {
+    if (!contact) return;
+    setFormData(prev => ({
+      ...prev,
+      guarantor_name: contact.name || prev.guarantor_name,
+      guarantor_phone: contact.phone || prev.guarantor_phone
+    }));
+  };
 
   useEffect(() => {
     if (isOpen) {
@@ -261,7 +292,8 @@ const ContractModal = ({ isOpen, onClose, onSave, customerId, customerName, isBl
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 modal-safe-area">
+    <>
+      <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 modal-safe-area">
       <div className="bg-slate-800 rounded-2xl w-full max-w-md overflow-hidden max-h-[90dvh] flex flex-col">
         <div className={`${themeColor === 'indigo' ? 'bg-indigo-900/50' : 'bg-slate-700'} px-6 py-4 flex justify-between items-center shrink-0`}>
           <div>
@@ -438,10 +470,20 @@ const ContractModal = ({ isOpen, onClose, onSave, customerId, customerName, isBl
 
           {/* Guarantor Section */}
           <div className="border-t border-slate-700 pt-4">
-            <h4 className="text-sm font-bold text-slate-400 mb-3 flex items-center gap-2">
-              <span>👤</span>
-              معلومات الكفيل (اختياري)
-            </h4>
+            <div className="flex items-center justify-between mb-3">
+              <h4 className="text-sm font-bold text-slate-400 flex items-center gap-2">
+                <span>👤</span>
+                معلومات الكفيل (اختياري)
+              </h4>
+              <button
+                type="button"
+                onClick={handlePickGuarantorContact}
+                className="text-xs bg-indigo-500/20 hover:bg-indigo-500/30 text-indigo-300 border border-indigo-500/40 px-2.5 py-1.5 rounded-lg font-bold flex items-center gap-1.5 transition-colors"
+              >
+                <span>📇</span>
+                <span>استرداد من جهات الاتصال</span>
+              </button>
+            </div>
             
             <div className="space-y-3">
               <input
@@ -456,6 +498,10 @@ const ContractModal = ({ isOpen, onClose, onSave, customerId, customerName, isBl
                 type="tel"
                 value={formData.guarantor_phone}
                 onChange={(e) => setFormData({ ...formData, guarantor_phone: e.target.value })}
+                onBlur={(e) => {
+                  const sanitized = sanitizePhoneNumber(e.target.value);
+                  setFormData(prev => ({ ...prev, guarantor_phone: sanitized }));
+                }}
                 className="w-full bg-slate-900 border border-slate-600 rounded-xl px-4 py-3 text-white placeholder-slate-500 focus:border-indigo-500 focus:outline-none transition-colors"
                 placeholder="رقم هاتف الكفيل"
                 dir="ltr"
@@ -473,6 +519,15 @@ const ContractModal = ({ isOpen, onClose, onSave, customerId, customerName, isBl
         </form>
       </div>
     </div>
+
+    {/* نافذة استرداد جهات الاتصال للكفيل */}
+    <ContactPickerModal
+      isOpen={showGuarantorPicker}
+      onClose={() => setShowGuarantorPicker(false)}
+      onSelectContact={handleGuarantorSelected}
+      title="استرداد بيانات الكفيل من جهات الاتصال"
+    />
+  </>
   );
 };
 

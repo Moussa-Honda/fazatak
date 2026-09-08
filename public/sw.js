@@ -1,4 +1,4 @@
-const CACHE_NAME = 'fazatak-cache-v1.0.6';
+const CACHE_NAME = 'fazatak-cache-v1.0.7';
 
 const PRECACHE_ASSETS = [
   '/',
