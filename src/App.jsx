@@ -21,6 +21,7 @@ function App() {
   useEffect(() => {
     checkAppLicense();
     initScreenPrivacy();
+    cloudSyncService.initAutoSyncListener();
   }, []);
 
   useEffect(() => {
@@ -30,10 +31,10 @@ function App() {
       console.error('Notification schedule init error:', error);
     });
 
-    // مزامنة دورية خفيفة في الخلفية لبيانات المستخدم إلى السحابة
+    // مزامنة ذكية فورية عند فتح التطبيق بحساب العميل
     if (currentUser?.phone) {
-      cloudSyncService.backupUserToCloud(currentUser.phone).catch((err) => {
-        console.warn('Background cloud backup note:', err);
+      cloudSyncService.syncWithCloud(currentUser.phone).catch((err) => {
+        console.warn('Startup cloud sync note:', err);
       });
     }
   }, [isLicensed, currentUser]);

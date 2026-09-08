@@ -5,7 +5,7 @@ import licenseService from '../services/license';
 import { PrivacyScreen } from '@capacitor-community/privacy-screen';
 import { Clipboard } from '@capacitor/clipboard';
 import { useLiveRefresh } from '../hooks/useLiveRefresh';
-import { cloudSyncService } from '../services/cloudSyncService';
+import { cloudSyncService, SYNC_STATUS_EVENT, LAST_SYNC_KEY } from '../services/cloudSyncService';
 
 const SUPPORT_PHONE_DISPLAY = '+966556854162';
 const SUPPORT_WHATSAPP_PHONE = '966556854162';
@@ -30,29 +30,27 @@ const ToggleItem = ({ title, description, value, onToggle, icon }) => (
 );
 
 const Settings = ({ onSettingsChange, onLicenseRenewed, currentUser, onLogout }) => {
-  const [syncLoading, setSyncLoading] = useState(false);
-  const [syncStatus, setSyncStatus] = useState('');
+  const [syncStatusText, setSyncStatusText] = useState('محفوظ مع السحابة تلقائياً ✓');
+  const [isSyncingLive, setIsSyncingLive] = useState(false);
 
-  const handleCloudSync = async () => {
-    if (!currentUser?.phone) {
-      setSyncStatus('لا يوجد حساب مسجل للمزامنة السحابية');
-      return;
-    }
-    setSyncLoading(true);
-    setSyncStatus('جاري رفع ومزامنة كافة المعاملات إلى السحابة...');
-    try {
-      const res = await cloudSyncService.backupUserToCloud(currentUser.phone);
-      if (res.success) {
-        setSyncStatus(`تمت المزامنة بنجاح! تم حفظ ${res.recordsCount} سجل في حسابك السحابي.`);
-      } else {
-        setSyncStatus(`تعذر المزامنة: ${res.error || 'تحقق من اتصال الإنترنت'}`);
+  useEffect(() => {
+    const handleSyncEvent = (e) => {
+      const { status } = e.detail || {};
+      if (status === 'syncing' || status === 'pending') {
+        setIsSyncingLive(true);
+        setSyncStatusText('جاري الحفظ التلقائي في السحابة...');
+      } else if (status === 'synced') {
+        setIsSyncingLive(false);
+        setSyncStatusText('تم الحفظ التلقائي في السحابة بنجاح ✓');
+      } else if (status === 'error') {
+        setIsSyncingLive(false);
+        setSyncStatusText('بانتظار اتصال الإنترنت للمزامنة...');
       }
-    } catch (err) {
-      setSyncStatus(`خطأ في المزامنة: ${err.message}`);
-    } finally {
-      setSyncLoading(false);
-    }
-  };
+    };
+
+    window.addEventListener(SYNC_STATUS_EVENT, handleSyncEvent);
+    return () => window.removeEventListener(SYNC_STATUS_EVENT, handleSyncEvent);
+  }, []);
   const [quickPaymentMode, setQuickPaymentMode] = useState(false);
   const [privacyMode, setPrivacyMode] = useState(false);
   const [screenPrivacy, setScreenPrivacy] = useState(true);
@@ -314,30 +312,26 @@ const Settings = ({ onSettingsChange, onLicenseRenewed, currentUser, onLogout })
             )}
           </div>
 
-          <button
-            type="button"
-            disabled={syncLoading}
-            onClick={handleCloudSync}
-            className="w-full py-3 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white rounded-xl font-bold text-xs shadow-md transition-all flex items-center justify-center gap-2"
-          >
-            {syncLoading ? (
-              <>
-                <div className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                <span>جاري المزامنة مع السحابة...</span>
-              </>
-            ) : (
-              <>
-                <span>☁️</span>
-                <span>مزامنة المعاملات سحابياً الآن</span>
-              </>
-            )}
-          </button>
-
-          {syncStatus && (
-            <p className="mt-3 text-xs text-center text-slate-300 bg-slate-950/60 p-2 rounded-lg border border-slate-800">
-              {syncStatus}
+          <div className="bg-slate-950/60 rounded-xl p-3.5 border border-emerald-500/30 space-y-2 text-xs">
+            <div className="flex items-center justify-between">
+              <span className="text-slate-200 font-bold flex items-center gap-2">
+                <span className={`w-2.5 h-2.5 rounded-full ${isSyncingLive ? 'bg-amber-400 animate-ping' : 'bg-emerald-400'}`} />
+                <span>المزامنة السحابية الفورية:</span>
+              </span>
+              <span className="px-2.5 py-0.5 rounded-full font-bold text-[11px] bg-emerald-500/20 text-emerald-400 border border-emerald-500/40">
+                {isSyncingLive ? 'جاري الحفظ...' : 'نشطة وتلقائية'}
+              </span>
+            </div>
+            <p className="text-slate-400 text-[11px] leading-relaxed">
+              جميع العقود والعملاء والأقساط تُحفظ سحابياً في حسابك تلقائياً وبشكل فوري بمجرد إضافتها، وتظهر تلقائياً على أي جهاز تسجل منه برقم هاتفك.
             </p>
-          )}
+            <div className="pt-2 border-t border-slate-800 flex justify-between items-center text-[10px] text-slate-400">
+              <span>حالة الحفظ التلقائي:</span>
+              <span className="text-emerald-300 font-medium">
+                {syncStatusText}
+              </span>
+            </div>
+          </div>
         </div>
       )}
 
