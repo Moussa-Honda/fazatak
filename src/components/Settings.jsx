@@ -4,7 +4,6 @@ import { notificationService } from '../services/notificationService';
 import licenseService from '../services/license';
 import { PrivacyScreen } from '@capacitor-community/privacy-screen';
 import { Clipboard } from '@capacitor/clipboard';
-import BackupRestore from './BackupRestore';
 import { useLiveRefresh } from '../hooks/useLiveRefresh';
 import { cloudSyncService } from '../services/cloudSyncService';
 
@@ -77,9 +76,6 @@ const Settings = ({ onSettingsChange, onLicenseRenewed, currentUser, onLogout })
   const [renewalLoading, setRenewalLoading] = useState(false);
   const [renewalMessage, setRenewalMessage] = useState('');
   const [deviceCopied, setDeviceCopied] = useState(false);
-
-  // حالة نافذة النسخ الاحتياطي
-  const [showBackup, setShowBackup] = useState(false);
 
   async function loadSettings() {
     try {
@@ -591,29 +587,8 @@ const Settings = ({ onSettingsChange, onLicenseRenewed, currentUser, onLogout })
         </div>
       </div>
 
-      {/* Backup Section */}
-      <div className="bg-slate-800 rounded-2xl p-6 border border-slate-700 shadow-sm">
-        <h3 className="text-lg font-bold text-white mb-4 flex items-center gap-2">النسخ الاحتياطي</h3>
-        <p className="text-slate-400 text-sm mb-4">احفظ نسخة أوفلاين على الجهاز وشارك نفس الملف عبر واتساب أو Google Drive</p>
-        <button
-          onClick={() => setShowBackup(true)}
-          className="w-full bg-emerald-500 text-white py-3 rounded-xl font-bold flex items-center justify-center gap-2 hover:bg-emerald-600 transition-colors"
-        >
-          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4m0 5c0 2.21-3.582 4-8 4s-8-1.79-8-4" />
-          </svg>
-          فتح النسخ الاحتياطي
-        </button>
-      </div>
-
-      {/* نافذة النسخ الاحتياطي */}
-      <BackupRestore
-        isOpen={showBackup}
-        onClose={() => setShowBackup(false)}
-      />
-
       <div className="text-center text-slate-500 text-sm pt-4">
-        <p>نظام فزتك (fazatak) v2.0 - مشفر أوفلاين</p>
+        <p>نظام فزتك (fazatak) - مزامنة سحابية آمنة ومشفرة</p>
       </div>
     </div>
   );
