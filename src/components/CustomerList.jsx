@@ -156,8 +156,8 @@ const CustomerList = ({
     } else if (activeTab === 'deleted') {
       result = result.filter(c => c.is_deleted === 1);
     } else {
-      // Exclude manually flagged defaulters from the general customers list
-      result = result.filter(c => c.status === activeTab && !c.is_manually_flagged_as_overdue && (!c.is_deleted));
+      // Keep all customers visible in their tab (overdue accounts have distinct visual indicators)
+      result = result.filter(c => c.status === activeTab && (!c.is_deleted));
     }
     
     if (search.trim()) {

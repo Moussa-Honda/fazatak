@@ -23,9 +23,9 @@ const CustomerModal = ({ isOpen, onClose, onSave, customer = null, managerId = n
       setFormData({
         name: customer.name || '',
         phone: customer.phone || '',
-        is_blacklisted: customer.is_blacklisted || false,
-        is_manually_flagged_as_overdue: customer.is_manually_flagged_as_overdue || false,
-        manager_id: customer.manager_id || managerId
+        is_blacklisted: Boolean(customer.is_blacklisted),
+        is_manually_flagged_as_overdue: Boolean(customer.is_manually_flagged_as_overdue),
+        manager_id: customer.manager_id !== undefined ? customer.manager_id : managerId
       });
     } else {
       setFormData({ name: '', phone: '', is_blacklisted: false, is_manually_flagged_as_overdue: false, manager_id: managerId });
@@ -40,11 +40,12 @@ const CustomerModal = ({ isOpen, onClose, onSave, customer = null, managerId = n
       // Sanitize phone number before saving
       const sanitizedPhone = sanitizePhoneNumber(formData.phone);
       
-      // Apply fallback for empty name
+      // Apply fallback for empty name and preserve status
       const dataToSave = {
         ...formData,
         name: formData.name.trim() || 'عميل جديد',
-        phone: sanitizedPhone
+        phone: sanitizedPhone,
+        status: customer?.status || 'active'
       };
 
       if (customer) {

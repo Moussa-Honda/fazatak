@@ -59,13 +59,77 @@ export const cloudSyncService = {
       });
     }
 
+    // 4. عند إغلاق التطبيق أو إخفاء الشاشة: رفع فوري إذا كان هناك أي حفظ معلق
+    if (typeof window !== 'undefined') {
+      const flushPendingSync = () => {
+        if (autoSyncTimeout) {
+          clearTimeout(autoSyncTimeout);
+          autoSyncTimeout = null;
+          const userPhone = authService.getCurrentUser()?.phone;
+          if (userPhone && !isImportingCloud) {
+            this.backupUserToCloud(userPhone).catch(err => {
+              console.warn('[AutoSync] Flush on exit warning:', err);
+            });
+          }
+        }
+      };
+      window.addEventListener('beforeunload', flushPendingSync);
+      window.addEventListener('pagehide', flushPendingSync);
+      if (typeof document !== 'undefined') {
+        document.addEventListener('visibilitychange', () => {
+          if (document.visibilityState === 'hidden') {
+            flushPendingSync();
+          }
+        });
+      }
+    }
+
     console.log('⚡ [AutoSync] Background real-time auto-sync activated.');
   },
 
   /**
-   * جدولة مزامنة سحابية تلقائية خفيفة (Debounced)
+   * دمج بيانات السحابة بأمان فائق دون حذف أي عميل أو معاملة محلية
    */
-  triggerAutoSync(phone = null, delayMs = 1500) {
+  async safeMergeCloudData(cloudPayload) {
+    if (!cloudPayload || !cloudPayload.tables) return;
+
+    const db = await getDatabase();
+    const tables = ['customers', 'contracts', 'installments', 'expenses', 'managers', 'custody', 'settings'];
+
+    for (const tableName of tables) {
+      const cloudRows = cloudPayload.tables[tableName];
+      if (!Array.isArray(cloudRows) || cloudRows.length === 0) continue;
+
+      for (const row of cloudRows) {
+        if (row.id !== undefined && row.id !== null) {
+          try {
+            const checkSql = `SELECT id FROM ${tableName} WHERE id = ?`;
+            const existing = await db.query(checkSql, [row.id]);
+            if (existing.values && existing.values.length > 0) {
+              const cols = Object.keys(row).filter(c => c !== 'id');
+              if (cols.length > 0) {
+                const setClause = cols.map(c => `${c} = ?`).join(', ');
+                const values = [...cols.map(c => row[c] ?? null), row.id];
+                await db.run(`UPDATE ${tableName} SET ${setClause} WHERE id = ?`, values, false);
+              }
+            } else {
+              const cols = Object.keys(row);
+              const placeholders = cols.map(() => '?').join(', ');
+              const values = cols.map(c => row[c] ?? null);
+              await db.run(`INSERT INTO ${tableName} (${cols.join(', ')}) VALUES (${placeholders})`, values, false);
+            }
+          } catch (rowErr) {
+            console.warn(`[SafeMerge] Note merging row in ${tableName}:`, rowErr.message);
+          }
+        }
+      }
+    }
+  },
+
+  /**
+   * جدولة مزامنة سحابية تلقائية خفيفة وفورية (300ms)
+   */
+  triggerAutoSync(phone = null, delayMs = 300) {
     if (isImportingCloud) return;
 
     const userPhone = phone || authService.getCurrentUser()?.phone;
@@ -168,7 +232,7 @@ export const cloudSyncService = {
   },
 
   /**
-   * مزامنة ذكية: إذا كانت السحابة تحتوي على تحديث أحدث من جهاز آخر، يتم استيراده تلقائياً
+   * مزامنة ذكية: دمج آمن بين السحابة والجهاز دون حذف أي بيانات
    */
   async syncWithCloud(phone) {
     if (!phone || !isSupabaseConfigured() || !supabase || isImportingCloud) return;
@@ -177,16 +241,27 @@ export const cloudSyncService = {
       const cloudRecord = await this.getCloudBackup(phone);
       if (!cloudRecord || !cloudRecord.updated_at) return;
 
+      const localPayload = await exportData();
+      const localCustomersCount = localPayload.tables?.customers?.length || 0;
+      const cloudCustomersCount = cloudRecord.backup_payload?.tables?.customers?.length || 0;
+
+      // أمان مطلق: إذا كان الجهاز المحلي به عملاء والسحابة فارغة، نقوم برفع المحلي فوراً لمنع مسح أي بيانات
+      if (localCustomersCount > 0 && cloudCustomersCount === 0) {
+        console.log('[CloudSync] Local has customers but cloud has none. Pushing local data to cloud...');
+        await this.backupUserToCloud(phone);
+        return;
+      }
+
       const localLastSync = localStorage.getItem(LAST_SYNC_KEY);
       const cloudDate = new Date(cloudRecord.updated_at).getTime();
       const localDate = localLastSync ? new Date(localLastSync).getTime() : 0;
 
-      // إذا كان تحديث السحابة أحدث من الجهاز الحالي بأكثر من 3 ثوانٍ
+      // إذا كان تحديث السحابة أحدث من الجهاز الحالي
       if (cloudDate > localDate + 3000 && cloudRecord.backup_payload) {
-        console.log('[CloudSync] Newer data found in cloud. Auto-updating local database...');
+        console.log('[CloudSync] Newer data found in cloud. Safe-merging into local database...');
         isImportingCloud = true;
         try {
-          await importData(cloudRecord.backup_payload);
+          await this.safeMergeCloudData(cloudRecord.backup_payload);
           localStorage.setItem(LAST_SYNC_KEY, cloudRecord.updated_at);
           notifySyncStatus('synced', {
             lastSync: cloudRecord.updated_at,
@@ -213,7 +288,7 @@ export const cloudSyncService = {
 
     try {
       isImportingCloud = true;
-      await importData(cloudRecord.backup_payload);
+      await this.safeMergeCloudData(cloudRecord.backup_payload);
       localStorage.setItem(LAST_SYNC_KEY, cloudRecord.updated_at);
       notifySyncStatus('synced', {
         lastSync: cloudRecord.updated_at,
@@ -234,18 +309,33 @@ export const cloudSyncService = {
   },
 
   /**
-   * عند تسجيل الدخول من أي جهاز جديد: يتم استرجاع المعاملات السحابية تلقائياً
+   * عند تسجيل الدخول من أي جهاز: دمج ذكي بدون مسح البيانات المحلية
    */
   async checkAndAutoRestoreOnLogin(phone) {
     if (!phone) return { restored: false };
 
     try {
       const cloudRecord = await this.getCloudBackup(phone);
-      if (cloudRecord && cloudRecord.backup_payload && cloudRecord.records_count > 0) {
-        console.log('[CloudSync] User logged in: automatically restoring all cloud transactions for:', phone);
+      if (!cloudRecord || !cloudRecord.backup_payload) {
+        return { restored: false };
+      }
+
+      const localPayload = await exportData();
+      const localCustomersCount = localPayload.tables?.customers?.length || 0;
+      const cloudCustomersCount = cloudRecord.backup_payload?.tables?.customers?.length || 0;
+
+      // أمان مطلق: إذا كان الجهاز المحلي به عملاء والسحابة فارغة، احفظ المحلي في السحابة فوراً
+      if (localCustomersCount > 0 && cloudCustomersCount === 0) {
+        console.log('[CloudSync] Login check: Local has customers, preserving and uploading to cloud...');
+        await this.backupUserToCloud(phone);
+        return { restored: false };
+      }
+
+      if (cloudRecord.records_count > 0) {
+        console.log('[CloudSync] User logged in: safe-merging cloud transactions for:', phone);
         isImportingCloud = true;
         try {
-          await importData(cloudRecord.backup_payload);
+          await this.safeMergeCloudData(cloudRecord.backup_payload);
           localStorage.setItem(LAST_SYNC_KEY, cloudRecord.updated_at);
           notifySyncStatus('synced', {
             lastSync: cloudRecord.updated_at,
