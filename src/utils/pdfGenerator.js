@@ -47,51 +47,63 @@ const loadSettings = async () => {
 const BASE_CSS = `
   @font-face { font-family:'Amiri'; src:url('/fonts/Amiri-Regular.ttf') format('truetype'); }
   * { box-sizing:border-box; margin:0; padding:0; }
-  body { font-family:'Amiri','Arial Unicode MS',sans-serif; direction:rtl; background:#fff;
-         width:794px; color:#1e1e1e; }
-  .header { background:#4b4b4b; color:#fff; padding:18px 24px 14px;
+  body, .pdf-page-root { 
+    font-family:'Tajawal','Amiri','Arial Unicode MS',Arial,sans-serif; 
+    direction:rtl; 
+    background:#ffffff !important; 
+    width:794px; 
+    color:#0f172a !important; 
+  }
+  .pdf-page-root * {
+    color: #0f172a;
+  }
+  .pdf-page-root .header, .pdf-page-root .header *, .pdf-page-root .strip, .pdf-page-root .strip * {
+    color: #ffffff !important;
+  }
+  .header { background:#1e293b; color:#ffffff !important; padding:18px 24px 14px;
             display:flex; justify-content:space-between; align-items:flex-start; }
-  .header .title { font-size:22px; font-weight:bold; }
-  .header .sub   { font-size:11px; margin-top:4px; opacity:.85; }
-  .header .co    { font-size:15px; text-align:left; line-height:1.7; }
-  .header .co small { display:block; font-size:10px; opacity:.85; }
-  .divider { height:1px; background:#ddd; margin:0 24px; }
-  .info { display:flex; justify-content:space-between; padding:14px 24px; }
+  .header .title { font-size:22px; font-weight:bold; color:#ffffff !important; }
+  .header .sub   { font-size:11px; margin-top:4px; opacity:.9; color:#f1f5f9 !important; }
+  .header .co    { font-size:15px; text-align:left; line-height:1.7; color:#ffffff !important; }
+  .header .co small { display:block; font-size:10px; opacity:.85; color:#e2e8f0 !important; }
+  .divider { height:1px; background:#e2e8f0; margin:0 24px; }
+  .info { display:flex; justify-content:space-between; padding:14px 24px; color:#0f172a !important; }
   .info-col { display:flex; flex-direction:column; gap:6px; }
-  .lbl { font-size:10px; color:#888; }
-  .val { font-size:13px; font-weight:bold; }
-  table { width:calc(100% - 48px); margin:0 24px; border-collapse:collapse; }
-  th { background:#4b4b4b; color:#fff; padding:9px 10px; font-size:11px; text-align:center; vertical-align:middle; }
-  td { padding:8px 10px; font-size:11px; border:1px solid #ddd; text-align:center; vertical-align:middle; }
-  tr:nth-child(even) td { background:#f5f5f5; }
-  .totals { margin:12px 24px 0; border:1px solid #ddd; border-radius:4px; overflow:hidden; }
-  .tot-row { display:flex; justify-content:space-between; padding:8px 14px; font-size:11px; }
-  .tot-row.grand { background:#4b4b4b; color:#fff; font-size:13px; font-weight:bold; }
-  .green { color:#0c8c50; }
-  .red   { color:#dc2626; }
-  .amber { color:#b47800; }
-  .footer { display:flex; justify-content:space-between; padding:12px 24px 0; border-top:1px solid #ccc; margin:18px 24px 0; }
-  .iban  { font-size:10px; color:#555; margin-top:4px; direction:ltr; text-align:right; }
-  .sig-line { border-top:1px solid #999; width:120px; margin-top:16px; }
-  .strip { background:#4b4b4b; color:#fff; text-align:center; padding:10px; font-size:13px; margin-top:14px; }
+  .lbl { font-size:11px; color:#64748b !important; }
+  .val { font-size:13px; font-weight:bold; color:#0f172a !important; }
+  table { width:calc(100% - 48px); margin:0 24px; border-collapse:collapse; background:#ffffff !important; }
+  th { background:#1e293b; color:#ffffff !important; padding:10px 8px; font-size:12px; text-align:center; vertical-align:middle; border:1px solid #334155; }
+  td { padding:8px 8px; font-size:12px; border:1px solid #cbd5e1; text-align:center; vertical-align:middle; color:#0f172a !important; background:#ffffff; }
+  tr:nth-child(even) td { background:#f8fafc; }
+  .totals { margin:14px 24px 0; border:1px solid #cbd5e1; border-radius:6px; overflow:hidden; background:#ffffff !important; }
+  .tot-row { display:flex; justify-content:space-between; padding:9px 14px; font-size:12px; color:#0f172a !important; }
+  .tot-row.grand, .tot-row.grand * { background:#1e293b; color:#ffffff !important; font-size:13px; font-weight:bold; }
+  .green { color:#059669 !important; font-weight:bold; }
+  .red   { color:#dc2626 !important; font-weight:bold; }
+  .amber { color:#d97706 !important; font-weight:bold; }
+  .footer { display:flex; justify-content:space-between; padding:12px 24px 0; border-top:1px solid #cbd5e1; margin:18px 24px 0; color:#334155 !important; }
+  .iban  { font-size:11px; color:#334155 !important; margin-top:4px; direction:ltr; text-align:right; font-weight:bold; }
+  .sig-line { border-top:1px solid #94a3b8; width:120px; margin-top:16px; }
+  .strip { background:#1e293b; color:#ffffff !important; text-align:center; padding:10px; font-size:13px; margin-top:14px; }
   /* Receipt */
-  .receipt-amt-label { text-align:center; font-size:13px; padding:10px 0 6px; }
-  .receipt-amt-box { border:2px solid #0c8c50; background:#ebfff5; border-radius:6px;
+  .receipt-amt-label { text-align:center; font-size:13px; padding:10px 0 6px; color:#0f172a !important; }
+  .receipt-amt-box { border:2px solid #059669; background:#ecfdf5; border-radius:6px;
                      margin:0 80px; padding:12px 0; text-align:center;
-                     font-size:28px; font-weight:bold; color:#0c8c50; }
-  .detail-card { margin:14px 24px 0; border:1px solid #ddd; border-radius:4px; background:#f5f5f5; }
-  .detail-row  { display:flex; justify-content:space-between; padding:8px 14px; font-size:12px; border-bottom:1px solid #e0e0e0; }
+                     font-size:28px; font-weight:bold; color:#059669 !important; }
+  .detail-card { margin:14px 24px 0; border:1px solid #cbd5e1; border-radius:6px; background:#f8fafc; }
+  .detail-row  { display:flex; justify-content:space-between; padding:9px 14px; font-size:12px; border-bottom:1px solid #e2e8f0; color:#0f172a !important; }
   .detail-row:last-child { border-bottom:none; }
-  .detail-label { color:#888; font-size:10px; }
-  .sigs { display:flex; justify-content:space-between; padding:14px 24px 0; }
-  .sig-block { text-align:center; font-size:11px; }
+  .detail-label { color:#64748b !important; font-size:11px; }
+  .sigs { display:flex; justify-content:space-between; padding:14px 24px 0; color:#0f172a !important; }
+  .sig-block { text-align:center; font-size:11px; color:#0f172a !important; }
 `;
 
 // ─── HTML builders ────────────────────────────────────────────────────────────
 const wrap = (body) => `
-<html dir="rtl" lang="ar">
-<head><meta charset="UTF-8"><style>${BASE_CSS}</style></head>
-<body>${body}</body></html>`;
+<div class="pdf-page-root" style="background:#ffffff !important; color:#0f172a !important; width:794px; direction:rtl; font-family:'Tajawal','Amiri',sans-serif; -webkit-font-smoothing:antialiased;">
+  <style>${BASE_CSS}</style>
+  ${body}
+</div>`;
 
 const businessDetailsHTML = (s) => {
   if (!s.showDetails) return '';
@@ -124,9 +136,9 @@ const footerHTML = (iban) => `
 
 const totalsHTML = (total, paid, remain) => `
 <div class="totals">
-  <div class="tot-row"><span>إجمالي العقد :</span><span>${fmt(Math.round(total))} SAR</span></div>
-  <div class="tot-row"><span>إجمالي المدفوع :</span><span class="green">${fmt(Math.round(paid))} SAR</span></div>
-  <div class="tot-row grand"><span>المتبقي :</span><span>${fmt(Math.round(remain))} SAR</span></div>
+  <div class="tot-row"><span style="font-weight:bold; color:#1e293b;">إجمالي العقد :</span><span style="font-weight:bold; color:#1e293b;">${fmt(Math.round(total))} ر.س</span></div>
+  <div class="tot-row"><span style="font-weight:bold; color:#1e293b;">إجمالي المدفوع :</span><span class="green" style="font-weight:bold;">${fmt(Math.round(paid))} ر.س</span></div>
+  <div class="tot-row grand"><span>المتبقي :</span><span style="font-weight:bold; color:#ffffff !important;">${fmt(Math.round(remain))} ر.س</span></div>
 </div>`;
 
 // ─── Mode 1: Global Summary ───────────────────────────────────────────────────
@@ -141,10 +153,10 @@ const buildGlobalHTML = async (customer, contracts, s, managedBy = null) => {
     const paid   = insts.reduce((s, i) => s + getPaidAmount(i), 0);
     const remain = Math.max(0, total - paid - disc);
     rows += `<tr>
-      <td>${c.title || '#' + c.id}</td>
-      <td>${fmt(Math.round(total))} SAR</td>
-      <td class="green">${fmt(Math.round(paid))} SAR</td>
-      <td class="${remain > 0 ? 'red' : 'green'}">${fmt(Math.round(remain))} SAR</td>
+      <td style="font-weight:bold; color:#0f172a;">${c.title || '#' + c.id}</td>
+      <td style="font-weight:bold; color:#0f172a;">${fmt(Math.round(total))} ر.س</td>
+      <td class="green" style="font-weight:bold;">${fmt(Math.round(paid))} ر.س</td>
+      <td class="${remain > 0 ? 'red' : 'green'}" style="font-weight:bold;">${fmt(Math.round(remain))} ر.س</td>
     </tr>`;
     grandTotal += total; grandPaid += paid; grandRemain += remain;
   }
@@ -153,16 +165,16 @@ const buildGlobalHTML = async (customer, contracts, s, managedBy = null) => {
     <div class="info">
       <div class="info-col">
         <div class="lbl">اسم العميل</div><div class="val">${customer?.name || '—'}</div>
-        <div class="lbl">رقم الجوال</div><div class="val">${customer?.phone || '—'}</div>
+        <div class="lbl">رقم الجوال</div><div class="val" style="direction:ltr; text-align:right;">${customer?.phone || '—'}</div>
       </div>
       <div class="info-col" style="text-align:left">
-        <div class="lbl">تاريخ الكشف</div><div class="val">${today()}</div>
-        <div class="lbl">عدد العقود</div><div class="val">${contracts.length}</div>
+        <div class="lbl">تاريخ الكشف</div><div class="val" style="direction:ltr; text-align:left;">${today()}</div>
+        <div class="lbl">عدد العقود</div><div class="val" style="color:#0f172a;">${contracts.length}</div>
       </div>
     </div>
     <div class="divider" style="margin-bottom:10px"></div>
     <table><thead><tr><th>اسم العقد</th><th>إجمالي العقد</th><th>المدفوع</th><th>المتبقي</th></tr></thead>
-    <tbody>${rows || '<tr><td colspan="4">لا توجد عقود</td></tr>'}</tbody></table>
+    <tbody>${rows || '<tr><td colspan="4" style="padding:16px; color:#64748b;">لا توجد عقود</td></tr>'}</tbody></table>
     ${totalsHTML(grandTotal, grandPaid, grandRemain)}
     ${footerHTML(s.ibanNumber)}`);
 };
@@ -234,29 +246,41 @@ const getArabicOrdinal = (number) => {
     : `${getArabicCardinal(normalized - remainder)} و${getArabicOrdinalUnder100(remainder)}`;
 };
 
-const buildContractHTML = async (customer, contract, s, managedBy = null) => {
-  let insts = [];
-  try { insts = (await installmentService.getByContractId(contract.id)) || []; } catch { /* Keep the statement printable if installments fail to load. */ }
-  const total  = contract.total_amount   || 0;
-  const disc   = contract.discount_amount || 0;
-  const paid   = insts.reduce((s, i) => s + getPaidAmount(i), 0);
+const buildContractHTML = async (customer, contract, s, managedBy = null, passedInstallments = null) => {
+  let insts = passedInstallments;
+  if (!Array.isArray(insts) || insts.length === 0) {
+    try {
+      const contractId = Number(contract.id);
+      insts = (await installmentService.getByContractId(contractId)) || [];
+    } catch (e) {
+      console.warn('Could not load installments for contract statement:', e);
+      insts = [];
+    }
+  }
+
+  const total  = Number(contract.total_amount || 0);
+  const disc   = Number(contract.discount_amount || 0);
+  const paid   = insts.reduce((sum, i) => sum + getPaidAmount(i), 0);
   const remain = Math.max(0, total - paid - disc);
 
   const rows = insts.map((inst, idx) => {
+    const origAmount = Number(inst.amount || 0);
     const paidAmount = getPaidAmount(inst);
-    const remainingAmount = Math.max(0, Number(inst.amount || 0) - paidAmount);
-    const isPartial = inst.status !== 'paid' && paidAmount > 0 && remainingAmount > 0;
-    const cls = inst.status === 'paid' ? 'green' : inst.status === 'postponed' || isPartial ? 'amber' : 'red';
-    const lbl = inst.status === 'paid' ? 'مدفوع' : inst.status === 'postponed' ? 'مؤجل' : isPartial ? 'مدفوع جزئياً' : 'متبقي';
-    const amount = inst.status === 'paid' ? paidAmount : remainingAmount || inst.amount;
-    const amountText = isPartial
-      ? `${fmt(Math.round(amount || 0))} SAR<br><small class="green">مدفوع: ${fmt(Math.round(paidAmount))} SAR</small>`
-      : `${fmt(Math.round(amount || 0))} SAR`;
+    const remainingAmount = Math.max(0, origAmount - paidAmount);
+    const isPaid = inst.status === 'paid' || (paidAmount > 0 && remainingAmount <= 0.009);
+    const isPartial = !isPaid && paidAmount > 0 && remainingAmount > 0;
+    const isPostponed = inst.status === 'postponed' && !isPaid;
+
+    const cls = isPaid ? 'green' : isPostponed || isPartial ? 'amber' : 'red';
+    const lbl = isPaid ? 'مدفوع' : isPostponed ? 'مؤجل' : isPartial ? 'مدفوع جزئياً' : 'متبقي';
+
     return `<tr>
-      <td>القسط ${getArabicOrdinal(idx + 1)}</td>
-      <td>${fmtDate(inst.due_date)}</td>
-      <td>${amountText}</td>
-      <td class="${cls}">${lbl}</td>
+      <td style="font-weight:bold; color:#0f172a;">#${idx + 1} (${getArabicOrdinal(idx + 1)})</td>
+      <td style="font-family:Arial,sans-serif; direction:ltr; color:#0f172a;">${fmtDate(inst.due_date)}</td>
+      <td style="font-weight:bold; color:#0f172a;">${fmt(Math.round(origAmount))} ر.س</td>
+      <td class="green" style="font-weight:bold;">${fmt(Math.round(paidAmount))} ر.س</td>
+      <td class="${remainingAmount > 0 ? 'red' : 'green'}" style="font-weight:bold;">${fmt(Math.round(remainingAmount))} ر.س</td>
+      <td class="${cls}" style="font-weight:bold;">${lbl}</td>
     </tr>`;
   }).join('');
 
@@ -265,18 +289,34 @@ const buildContractHTML = async (customer, contract, s, managedBy = null) => {
     <div class="info">
       <div class="info-col">
         <div class="lbl">اسم العميل</div><div class="val">${customer?.name || '—'}</div>
-        <div class="lbl">رقم الجوال</div><div class="val">${customer?.phone || '—'}</div>
+        <div class="lbl">رقم الجوال</div><div class="val" style="direction:ltr; text-align:right;">${customer?.phone || '—'}</div>
+        ${contract.guarantor_name ? `<div class="lbl">الكفيل</div><div class="val">${contract.guarantor_name} ${contract.guarantor_phone ? `(${contract.guarantor_phone})` : ''}</div>` : ''}
       </div>
       <div class="info-col" style="text-align:left">
-        <div class="lbl">تاريخ الكشف</div><div class="val">${today()}</div>
-        <div class="lbl">إجمالي العقد</div><div class="val">${fmt(Math.round(total))} SAR</div>
+        <div class="lbl">تاريخ الكشف</div><div class="val" style="direction:ltr; text-align:left;">${today()}</div>
+        <div class="lbl">إجمالي العقد</div><div class="val" style="color:#0f172a;">${fmt(Math.round(total))} ر.س</div>
+        <div class="lbl">عدد الأقساط</div><div class="val" style="color:#0f172a;">${insts.length} قسط</div>
       </div>
     </div>
     <div class="divider" style="margin-bottom:10px"></div>
-    <table><thead><tr><th>وصف القسط</th><th>تاريخ الاستحقاق</th><th>المبلغ</th><th>الحالة</th></tr></thead>
-    <tbody>${rows || '<tr><td colspan="4">لا توجد أقساط</td></tr>'}</tbody></table>
+    <table>
+      <thead>
+        <tr>
+          <th>رقم القسط</th>
+          <th>تاريخ الاستحقاق</th>
+          <th>مبلغ القسط</th>
+          <th>المسدد</th>
+          <th>المتبقي</th>
+          <th>الحالة</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${rows || '<tr><td colspan="6" style="padding:16px; color:#64748b;">لا توجد أقساط مسجلة لهذا العقد</td></tr>'}
+      </tbody>
+    </table>
     ${totalsHTML(total, paid, remain)}
-    ${footerHTML(s.ibanNumber)}`);
+    ${footerHTML(s.ibanNumber)}
+  `);
 };
 
 // ─── Mode 3: Receipt ──────────────────────────────────────────────────────────
@@ -285,20 +325,20 @@ const buildReceiptHTML = (customer, installment, contract, s, managedBy = null) 
   return wrap(`
     ${headerHTML('سند قبض', `رقم الإيصال: ${installment.id}-${new Date().getFullYear()}`, s, managedBy)}
     <div class="receipt-amt-label">تم استلام مبلغ وقدره</div>
-    <div class="receipt-amt-box">${fmt(amt)} SAR</div>
+    <div class="receipt-amt-box">${fmt(amt)} ر.س</div>
     <div class="detail-card">
-      <div class="detail-row"><span class="detail-label">اسم العميل</span><span>${customer?.name || '—'}</span></div>
-      <div class="detail-row"><span class="detail-label">اسم العقد</span><span>${contract?.title || '—'}</span></div>
-      <div class="detail-row"><span class="detail-label">وصف القسط</span><span>القسط #${installment.id}</span></div>
-      <div class="detail-row"><span class="detail-label">تاريخ الاستحقاق</span><span>${fmtDate(installment.due_date)}</span></div>
-      <div class="detail-row"><span class="detail-label">تاريخ السداد</span><span>${fmtDate(installment.paid_at) || today()}</span></div>
-      <div class="detail-row"><span class="detail-label">المبلغ المسدد</span><span class="green">${fmt(amt)} SAR</span></div>
+      <div class="detail-row"><span class="detail-label">اسم العميل</span><span style="font-weight:bold; color:#0f172a;">${customer?.name || '—'}</span></div>
+      <div class="detail-row"><span class="detail-label">اسم العقد</span><span style="font-weight:bold; color:#0f172a;">${contract?.title || '—'}</span></div>
+      <div class="detail-row"><span class="detail-label">وصف القسط</span><span style="font-weight:bold; color:#0f172a;">القسط #${installment.id}</span></div>
+      <div class="detail-row"><span class="detail-label">تاريخ الاستحقاق</span><span style="font-family:Arial,sans-serif; direction:ltr; color:#0f172a;">${fmtDate(installment.due_date)}</span></div>
+      <div class="detail-row"><span class="detail-label">تاريخ السداد</span><span style="font-family:Arial,sans-serif; direction:ltr; color:#0f172a;">${fmtDate(installment.paid_at) || today()}</span></div>
+      <div class="detail-row"><span class="detail-label">المبلغ المسدد</span><span class="green" style="font-weight:bold;">${fmt(amt)} ر.س</span></div>
     </div>
     <div class="sigs">
       <div class="sig-block"><div>توقيع المستلم</div><div class="sig-line" style="margin:auto;margin-top:16px"></div></div>
       <div class="sig-block"><div>توقيع العميل</div><div class="sig-line" style="margin:auto;margin-top:16px"></div></div>
     </div>
-    ${s.ibanNumber ? `<div style="text-align:center;font-size:10px;color:#555;margin-top:10px;direction:ltr">IBAN: ${s.ibanNumber}</div>` : ''}
+    ${s.ibanNumber ? `<div style="text-align:center;font-size:10px;color:#334155;margin-top:10px;direction:ltr">IBAN: ${s.ibanNumber}</div>` : ''}
     <div class="strip">شكراً لتعاملكم معنا</div>`);
 };
 
@@ -309,9 +349,9 @@ const buildCustodyHTML = (custody, expenses, s) => {
 
   const rows = expenses.map((exp) => `
     <tr>
-      <td>${fmtDate(exp.date)}</td>
-      <td>${exp.description || '—'}</td>
-      <td class="red">${fmt(exp.amount)} SAR</td>
+      <td style="font-family:Arial,sans-serif; direction:ltr; color:#0f172a;">${fmtDate(exp.date)}</td>
+      <td style="color:#0f172a;">${exp.description || '—'}</td>
+      <td class="red" style="font-weight:bold;">${fmt(exp.amount)} ر.س</td>
     </tr>
   `).join('');
 
@@ -320,24 +360,24 @@ const buildCustodyHTML = (custody, expenses, s) => {
     <div class="info">
       <div class="info-col">
         <div class="lbl">اسم المسؤول</div><div class="val">${custody.name || '—'}</div>
-        <div class="lbl">المبلغ المسلم</div><div class="val">${fmt(custody.capital)} SAR</div>
+        <div class="lbl">المبلغ المسلم</div><div class="val" style="color:#0f172a;">${fmt(custody.capital)} ر.س</div>
       </div>
       <div class="info-col" style="text-align:left">
-        <div class="lbl">تاريخ التقرير</div><div class="val">${today()}</div>
-        <div class="lbl">إجمالي العمليات</div><div class="val">${expenses.length}</div>
+        <div class="lbl">تاريخ التقرير</div><div class="val" style="direction:ltr; text-align:left;">${today()}</div>
+        <div class="lbl">إجمالي العمليات</div><div class="val" style="color:#0f172a;">${expenses.length}</div>
       </div>
     </div>
 
     <div class="totals" style="background:#f8fafc; border-color:#e2e8f0; margin-bottom:20px">
-      <div class="tot-row"><span class="lbl">إجمالي العهدة :</span><span class="val" style="color:#1e293b">${fmt(custody.capital)} SAR</span></div>
-      <div class="tot-row"><span class="lbl">إجمالي المنصرف :</span><span class="val red">${fmt(totalSpent)} SAR</span></div>
+      <div class="tot-row"><span class="lbl">إجمالي العهدة :</span><span class="val" style="color:#1e293b">${fmt(custody.capital)} ر.س</span></div>
+      <div class="tot-row"><span class="lbl">إجمالي المنصرف :</span><span class="val red">${fmt(totalSpent)} ر.س</span></div>
       <div class="tot-row grand" style="background:${remaining < 0 ? '#be123c' : '#047857'}">
         <span>المتبقي :</span>
-        <span>${fmt(remaining)} SAR</span>
+        <span style="font-weight:bold; color:#ffffff !important;">${fmt(remaining)} ر.س</span>
       </div>
     </div>
 
-    <div style="padding:0 24px 8px; font-weight:bold; font-size:12px; color:#4b4b4b">سجل المصروفات بالتفصيل:</div>
+    <div style="padding:0 24px 8px; font-weight:bold; font-size:12px; color:#0f172a">سجل المصروفات بالتفصيل:</div>
     <table>
       <thead>
         <tr>
@@ -347,7 +387,7 @@ const buildCustodyHTML = (custody, expenses, s) => {
         </tr>
       </thead>
       <tbody>
-        ${rows || '<tr><td colspan="3" style="text-align:center; padding:20px; color:#888">لا توجد مصروفات مسجلة</td></tr>'}
+        ${rows || '<tr><td colspan="3" style="text-align:center; padding:20px; color:#64748b">لا توجد مصروفات مسجلة</td></tr>'}
       </tbody>
     </table>
     ${footerHTML(s.ibanNumber)}
@@ -356,13 +396,38 @@ const buildCustodyHTML = (custody, expenses, s) => {
 
 // ─── HTML → PDF via html2canvas ───────────────────────────────────────────────
 const renderHTMLtoPDF = async (htmlString) => {
-  // Create hidden container
+  // Create hidden container with explicit white background and dark text
   const container = document.createElement('div');
-  container.style.cssText = 'position:fixed;left:-9999px;top:0;width:794px;z-index:-1;';
+  container.style.cssText = 'position:fixed;left:-9999px;top:0;width:794px;z-index:-9999;background:#ffffff !important;color:#0f172a !important;direction:rtl;';
   container.innerHTML = htmlString;
   document.body.appendChild(container);
 
-  // Wait for Amiri font to load
+  // Force explicit styling on all inner elements to prevent text-slate-100 inheritance
+  container.querySelectorAll('*').forEach(el => {
+    if (el.closest('.header') || el.closest('.strip') || el.closest('.tot-row.grand')) {
+      el.style.color = '#ffffff';
+      return;
+    }
+    if (el.classList.contains('green')) {
+      el.style.color = '#059669';
+      return;
+    }
+    if (el.classList.contains('red')) {
+      el.style.color = '#dc2626';
+      return;
+    }
+    if (el.classList.contains('amber')) {
+      el.style.color = '#d97706';
+      return;
+    }
+    if (el.classList.contains('lbl') || el.classList.contains('detail-label')) {
+      el.style.color = '#64748b';
+      return;
+    }
+    el.style.color = '#0f172a';
+  });
+
+  // Wait for Amiri / Tajawal font to load
   try { await document.fonts.ready; } catch { /* Continue rendering with fallback fonts. */ }
 
   try {
@@ -466,9 +531,9 @@ export const generatePDF = async (customer, mode, specificData = {}) => {
       fileName = `كشف_شامل_${safe}_${date}.pdf`;
 
     } else if (mode === PDF_MODES.CONTRACT_STATEMENT) {
-      const { contract } = specificData;
+      const { contract, installments } = specificData;
       if (!contract) { alert('بيانات العقد غير متوفرة'); return false; }
-      html     = await buildContractHTML(customer, contract, s, managedBy);
+      html     = await buildContractHTML(customer, contract, s, managedBy, installments);
       fileName = `كشف_عقد_${(contract.title||'').replace(/\s/g,'_')}_${date}.pdf`;
 
     } else if (mode === PDF_MODES.INSTALLMENT_RECEIPT) {

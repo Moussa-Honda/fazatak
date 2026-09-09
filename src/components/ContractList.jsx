@@ -389,7 +389,14 @@ const ContractList = ({ customerId, isReadOnly, onRenewalRequest, themeColor = '
     if (pdfLoading) return;
     setPdfLoading(contract.id);
     try {
-      await generatePDF(customer, PDF_MODES.CONTRACT_STATEMENT, { contract });
+      let contractInstallments = installments[contract.id];
+      if (!contractInstallments || contractInstallments.length === 0) {
+        contractInstallments = await installmentService.getByContractId(contract.id);
+        if (contractInstallments && contractInstallments.length > 0) {
+          setInstallments(prev => ({ ...prev, [contract.id]: contractInstallments }));
+        }
+      }
+      await generatePDF(customer, PDF_MODES.CONTRACT_STATEMENT, { contract, installments: contractInstallments });
     } catch (e) {
       console.error('Contract PDF error:', e);
       alert('حدث خطأ أثناء إنشاء PDF');
