@@ -10,12 +10,24 @@ jeepSqlite(window)
 
 // Register Service Worker for Offline PWA
 if ('serviceWorker' in navigator && window.location.protocol.startsWith('http')) {
-  window.addEventListener('load', () => {
-    navigator.serviceWorker.register('/sw.js').catch((err) => {
+  window.addEventListener('load', async () => {
+    try {
+      const registration = await navigator.serviceWorker.register('/sw.js', {
+        scope: '/',
+        updateViaCache: 'none',
+      })
+
+      console.log('[SW] Registered ✅ scope:', registration.scope)
+
+      // لا نُعيد التحميل تلقائياً لتجنب فقدان البيانات
+      // التحديث يحدث في المرة القادمة التي يفتح فيها المستخدم التطبيق
+
+    } catch (err) {
       console.warn('[SW] Registration failed:', err)
-    })
+    }
   })
 }
+
 
 const mountApp = async () => {
   try {

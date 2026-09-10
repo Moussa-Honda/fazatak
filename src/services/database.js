@@ -124,6 +124,29 @@ export const persistWebStore = async () => {
   }
 };
 
+// ─── حفظ تلقائي عند إغلاق/إخفاء التطبيق ────────────────
+// يضمن عدم فقدان البيانات حتى لو لم يُستدعَ persistWebStore يدوياً
+if (typeof window !== 'undefined') {
+  const flushOnExit = () => persistWebStore().catch(() => {});
+
+  // عند إغلاق التاب أو المتصفح
+  window.addEventListener('beforeunload', flushOnExit);
+
+  // عند إخفاء التطبيق (تبديل التاب أو الضغط على الهوم في الجوال)
+  if (typeof document !== 'undefined') {
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'hidden') {
+        flushOnExit();
+      }
+    });
+  }
+
+  // دعم إضافي لـ iOS Safari PWA
+  window.addEventListener('pagehide', flushOnExit);
+}
+
+
+
 const wrapDbConnection = (rawDb) => {
   if (!isWebStore || !rawDb || rawDb.__wrapped) return rawDb;
 

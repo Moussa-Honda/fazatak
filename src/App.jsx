@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import Dashboard from './screens/Dashboard';
 import AuthGate from './components/AuthGate';
+import WelcomeOnboarding, { useOnboarding } from './components/WelcomeOnboarding';
 import { authService } from './services/authService';
 import { cloudSyncService } from './services/cloudSyncService';
 import licenseService from './services/license';
@@ -17,6 +18,7 @@ function App() {
   const [isExpired, setIsExpired] = useState(false);
   const [expiry, setExpiry] = useState(null);
   const [decryptionKey, setDecryptionKey] = useState('FAZATAK_SECURE_KEY');
+  const { showOnboarding, completeOnboarding } = useOnboarding();
 
   useEffect(() => {
     checkAppLicense();
@@ -139,6 +141,11 @@ function App() {
         </div>
       </div>
     );
+  }
+
+  // Show welcome onboarding for brand new users (before auth gate)
+  if (showOnboarding) {
+    return <WelcomeOnboarding onComplete={completeOnboarding} />;
   }
 
   if (!isLicensed) {
