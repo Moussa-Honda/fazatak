@@ -202,12 +202,6 @@ const CustomerModal = ({ isOpen, onClose, onSave, customer = null, managerId = n
       isOpen={showContactPicker}
       onClose={() => setShowContactPicker(false)}
       onSelectContact={handleContactSelected}
-      onFocusForm={() => {
-        setShowContactPicker(false);
-        setTimeout(() => {
-          nameInputRef.current?.focus();
-        }, 150);
-      }}
       title="إضافة من جهات الاتصال"
     />
   </>

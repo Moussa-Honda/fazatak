@@ -535,12 +535,6 @@ const ContractModal = ({ isOpen, onClose, onSave, customerId, customerName, isBl
       isOpen={showGuarantorPicker}
       onClose={() => setShowGuarantorPicker(false)}
       onSelectContact={handleGuarantorSelected}
-      onFocusForm={() => {
-        setShowGuarantorPicker(false);
-        setTimeout(() => {
-          guarantorNameInputRef.current?.focus();
-        }, 150);
-      }}
       title="إضافة الكفيل من جهات الاتصال"
     />
   </>

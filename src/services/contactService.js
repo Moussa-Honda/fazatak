@@ -211,6 +211,7 @@ export const parseContactText = (text) => {
   let name = '';
 
   if (match && match.length > 0) {
+    phone = sanitizePhoneNumber(match[0]);
     name = text
       .replace(match[0], '')
       .replace(/^(الاسم|الاسم الكريم|اسم العميل|الاسم:|اسم:|Name:|Contact:)/gi, '')
