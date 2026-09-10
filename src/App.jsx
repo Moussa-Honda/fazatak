@@ -33,10 +33,10 @@ function App() {
       console.error('Notification schedule init error:', error);
     });
 
-    // فحص واسترجاع ذكي فوري عند فتح التطبيق بحساب العميل
+    // فحص مزامنة التحديثات في الخلفية عند فتح التطبيق
     if (currentUser?.phone) {
-      cloudSyncService.checkAndAutoRestoreOnLogin(currentUser.phone).catch((err) => {
-        console.warn('Startup auto-restore/sync note:', err);
+      cloudSyncService.syncWithCloud(currentUser.phone).catch((err) => {
+        console.warn('Background sync check note:', err);
       });
     }
   }, [isLicensed, currentUser]);
@@ -77,6 +77,13 @@ function App() {
           setDecryptionKey('FAZATAK_SECURE_KEY');
         }
 
+        // فحص واسترجاع ذكي فوري إذا كانت المعاملات غير موجودة محلياً قبل فتح الواجهة
+        try {
+          await cloudSyncService.fullSyncOnLogin(user.phone);
+        } catch (syncErr) {
+          console.warn('Startup sync check note:', syncErr);
+        }
+
         // تحديث صلاحية الاشتراك في الخلفية إن وجد إنترنت
         authService.refreshSubscription().then((updated) => {
           if (updated && updated.subscription_expiry) {
@@ -105,7 +112,7 @@ function App() {
         setIsLicensed(false);
       }
     } finally {
-      setTimeout(() => setIsLoading(false), 600);
+      setTimeout(() => setIsLoading(false), 400);
     }
   };
 
@@ -116,13 +123,6 @@ function App() {
     setIsLicensed(true);
     setIsExpired(false);
     setDecryptionKey('FAZATAK_SECURE_KEY');
-
-    // تشغيل فحص المزامنة التلقائية
-    try {
-      await cloudSyncService.checkAndAutoRestoreOnLogin(user.phone);
-    } catch (e) {
-      console.warn('Auto restore post-auth warning:', e);
-    }
   };
 
   const handleLogout = () => {

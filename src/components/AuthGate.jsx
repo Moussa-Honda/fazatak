@@ -37,22 +37,25 @@ const AuthGate = ({ onAuthenticated, isExpired = false, initialUser = null }) =>
   // Activation Code for Expired Accounts
   const [activationCode, setActivationCode] = useState('');
 
+  const [loginStatusText, setLoginStatusText] = useState('');
   const currentUser = initialUser || authService.getCurrentUser();
 
   const handleLogin = async (e) => {
     e?.preventDefault();
     setError('');
     setSuccessMsg('');
+    setLoginStatusText('جاري التحقق من بيانات الدخول...');
     setLoading(true);
 
     try {
       const user = await authService.login(loginPhone, loginPassword);
       
-      // مزامنة واسترجاع تلقائي في حال كان المتصفح جديداً ولا توجد بيانات
+      // مزامنة واسترجاع تلقائي كامل قبل دخول التطبيق لضمان استرجاع كافة المعاملات
+      setLoginStatusText('جاري استرجاع معاملاتك وبياناتك من السحابة...');
       try {
-        await cloudSyncService.checkAndAutoRestoreOnLogin(user.phone);
+        await cloudSyncService.fullSyncOnLogin(user.phone);
       } catch (syncErr) {
-        console.warn('Auto restore sync notice:', syncErr);
+        console.warn('Login cloud sync error:', syncErr);
       }
 
       if (user.subscription_status === 'expired') {
@@ -64,6 +67,7 @@ const AuthGate = ({ onAuthenticated, isExpired = false, initialUser = null }) =>
       setError(err.message || 'فشل تسجيل الدخول، تأكد من صحة البيانات');
     } finally {
       setLoading(false);
+      setLoginStatusText('');
     }
   };
 
@@ -304,7 +308,7 @@ const AuthGate = ({ onAuthenticated, isExpired = false, initialUser = null }) =>
                 {loading ? (
                   <>
                     <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                    <span>جاري تسجيل الدخول...</span>
+                    <span>{loginStatusText || 'جاري تسجيل الدخول...'}</span>
                   </>
                 ) : (
                   <>

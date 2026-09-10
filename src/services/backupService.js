@@ -16,7 +16,9 @@ const TABLES = [
   { name: 'installments', orderBy: 'id' },
   { name: 'expenses', orderBy: 'id' },
   { name: 'portfolios', orderBy: 'id' },
-  { name: 'portfolio_expenses', orderBy: 'id' }
+  { name: 'portfolio_expenses', orderBy: 'id' },
+  { name: 'customer_month_statuses', orderBy: 'id' },
+  { name: 'installment_postponements', orderBy: 'id' }
 ];
 
 const LEGACY_TABLE_ALIASES = {
@@ -438,4 +440,27 @@ export const formatFileSize = (bytes = 0) => {
 export const formatDate = (date) => {
   if (!date) return 'غير متوفر';
   return new Date(date).toLocaleString('ar-SA');
+};
+
+export const getBusinessRecordsCount = (backupOrPayload) => {
+  if (!backupOrPayload) return 0;
+  const counts = backupOrPayload.counts || {};
+  const tables = backupOrPayload.tables || {};
+
+  const getCount = (name) => {
+    if (counts[name] !== undefined) return Number(counts[name]) || 0;
+    if (Array.isArray(tables[name])) return tables[name].length;
+    return 0;
+  };
+
+  return (
+    getCount('customers') +
+    getCount('contracts') +
+    getCount('installments') +
+    getCount('expenses') +
+    getCount('portfolios') +
+    getCount('portfolio_expenses') +
+    getCount('customer_month_statuses') +
+    getCount('installment_postponements')
+  );
 };

@@ -1,5 +1,5 @@
 import { supabase, isSupabaseConfigured } from './supabase';
-import { exportData, importData } from './backupService';
+import { exportData, importData, getBusinessRecordsCount } from './backupService';
 import { getDatabase, persistWebStore } from './database';
 import { DATA_CHANGED_EVENT, notifyDataChanged } from './dataEvents';
 import { authService } from './authService';
@@ -33,10 +33,10 @@ export const cloudSyncService = {
     if (typeof window === 'undefined' || autoSyncInitialized) return;
     autoSyncInitialized = true;
 
-    // 1. عند حدوث أي عملية (إضافة عميل، عقد، سداد قسط، تعديل، حذف): حفظ ومزامنة فورية (50ms)
+    // 1. عند حدوث أي عملية (إضافة عميل، عقد، سداد قسط، تعديل، حذف): حفظ ومزامنة فورية (100ms)
     window.addEventListener(DATA_CHANGED_EVENT, (e) => {
       if (isImportingCloud) return;
-      this.triggerAutoSync(null, 50);
+      this.triggerAutoSync(null, 100);
     });
 
     // 2. عند عودة الاتصال بالإنترنت: رفع المعاملات فوراً
@@ -44,21 +44,27 @@ export const cloudSyncService = {
       this.triggerAutoSync(null, 0);
     });
 
-    // 3. عند الرجوع للتطبيق/التبويب: التأكد من سلامة المزامنة ورفع أي تغيير معلق
+    // 3. عند الرجوع للتطبيق/التبويب أو التركيز عليه: فحص السحابة لجلب أي تعديل من متصفح آخر
     if (typeof document !== 'undefined') {
+      const checkRemoteUpdates = () => {
+        const userPhone = authService.getCurrentUser()?.phone;
+        if (userPhone && !isImportingCloud && !isSyncInProgress) {
+          this.syncWithCloud(userPhone).catch((err) => {
+            console.warn('[AutoSync] Focus sync check note:', err);
+          });
+        }
+      };
+
       document.addEventListener('visibilitychange', () => {
         if (document.visibilityState === 'visible') {
-          const userPhone = authService.getCurrentUser()?.phone;
-          if (userPhone) {
-            this.syncWithCloud(userPhone).catch((err) => {
-              console.warn('[AutoSync] Background sync check warning:', err);
-            });
-          }
+          checkRemoteUpdates();
         }
       });
+
+      window.addEventListener('focus', checkRemoteUpdates);
     }
 
-    // 4. عند إغلاق التطبيق أو إخفاء الشاشة: رفع فوري دون أي تأخير لأي معاملة معلقة
+    // 4. عند إغلاق التطبيق أو إخفاء الشاشة: رفع فوري لأي معاملة معلقة
     if (typeof window !== 'undefined') {
       const flushPendingSync = () => {
         const userPhone = authService.getCurrentUser()?.phone;
@@ -93,27 +99,60 @@ export const cloudSyncService = {
   async safeMergeCloudData(cloudPayload) {
     if (!cloudPayload || !cloudPayload.tables) return;
 
+    // إذا كانت القاعدة المحلية خالية من المعاملات، استخدم importData الشامل والموثوق فوراً
+    const localPayload = await exportData();
+    const localBusinessCount = getBusinessRecordsCount(localPayload);
+    if (localBusinessCount === 0) {
+      await importData(cloudPayload);
+      await persistWebStore();
+      return;
+    }
+
     const db = await getDatabase();
-    const tables = ['customers', 'contracts', 'installments', 'expenses', 'managers', 'custody', 'settings'];
+    const tables = [
+      'settings',
+      'managers',
+      'customers',
+      'contracts',
+      'installments',
+      'expenses',
+      'portfolios',
+      'portfolio_expenses',
+      'customer_month_statuses',
+      'installment_postponements'
+    ];
 
     for (const tableName of tables) {
       const cloudRows = cloudPayload.tables[tableName];
       if (!Array.isArray(cloudRows) || cloudRows.length === 0) continue;
 
       for (const row of cloudRows) {
-        if (row.id !== undefined && row.id !== null) {
-          try {
+        if (!row || typeof row !== 'object') continue;
+
+        try {
+          if (tableName === 'settings') {
+            if (row.key) {
+              await db.run(
+                'INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value',
+                [row.key, row.value ?? ''],
+                false
+              );
+            }
+            continue;
+          }
+
+          if (row.id !== undefined && row.id !== null) {
             const checkSql = `SELECT * FROM ${tableName} WHERE id = ?`;
             const existing = await db.query(checkSql, [row.id]);
+
             if (existing.values && existing.values.length > 0) {
               const localRow = existing.values[0];
 
-              // 🛡️ حماية خاصة للأقساط: إذا سُدد القسط محلياً، لا نسمح للسحابة القديمة بإرجاعه لغير مسدد أبداً
+              // 🛡️ حماية خاصة للأقساط: إذا سُدد القسط محلياً، لا نسمح للسحابة القديمة بإرجاعه لغير مسدد
               if (tableName === 'installments') {
                 const isLocallyPaid = String(localRow.status || '').toLowerCase() === 'paid' || Number(localRow.actual_paid || 0) > 0;
                 const isCloudPaid = String(row.status || '').toLowerCase() === 'paid' || Number(row.actual_paid || 0) > 0;
                 if (isLocallyPaid && !isCloudPaid) {
-                  console.log(`[SafeMerge] 🛡️ حماية السداد المحلي للقسط #${row.id} ومنع إرجاعه لغير مسدد.`);
                   continue;
                 }
               }
@@ -121,47 +160,38 @@ export const cloudSyncService = {
               // 🛡️ حماية خاصة للعملاء: لا نسمح للسحابة بحذف عميل نشط محلياً
               if (tableName === 'customers') {
                 if (!localRow.is_deleted && row.is_deleted) {
-                  console.log(`[SafeMerge] 🛡️ حماية العميل المحلي #${row.id} ومنع حذفه.`);
                   continue;
                 }
               }
 
               const cols = Object.keys(row).filter(c => c !== 'id');
               if (cols.length > 0) {
-                const setClause = cols.map(c => `${c} = ?`).join(', ');
+                const setClause = cols.map(c => `"${c}" = ?`).join(', ');
                 const values = [...cols.map(c => row[c] ?? null), row.id];
                 await db.run(`UPDATE ${tableName} SET ${setClause} WHERE id = ?`, values, false);
               }
             } else {
               const cols = Object.keys(row);
+              const quotedCols = cols.map(c => `"${c}"`).join(', ');
               const placeholders = cols.map(() => '?').join(', ');
               const values = cols.map(c => row[c] ?? null);
-              await db.run(`INSERT INTO ${tableName} (${cols.join(', ')}) VALUES (${placeholders})`, values, false);
+              await db.run(`INSERT INTO ${tableName} (${quotedCols}) VALUES (${placeholders})`, values, false);
             }
-          } catch (rowErr) {
-            console.warn(`[SafeMerge] Note merging row in ${tableName}:`, rowErr.message);
           }
+        } catch (rowErr) {
+          console.warn(`[SafeMerge] Note merging row in ${tableName}:`, rowErr.message);
         }
       }
     }
 
     // تأكيد حفظ الدمج في SQLite WebStore محلياً
     await persistWebStore();
-
-    // تحديث كاش المستخدم المحلي في localStorage برقم هاتفه
-    const currentUserPhone = authService.getCurrentUser()?.phone;
-    if (currentUserPhone) {
-      try {
-        const fullPayload = await exportData();
-        localStorage.setItem(`fazatak_user_cache_${currentUserPhone}`, JSON.stringify(fullPayload));
-      } catch {}
-    }
   },
 
   /**
-   * جدولة مزامنة سحابية تلقائية فائقة السرعة وفورية (50ms)
+   * جدولة مزامنة سحابية تلقائية فائقة السرعة
    */
-  triggerAutoSync(phone = null, delayMs = 50) {
+  triggerAutoSync(phone = null, delayMs = 100) {
     if (isImportingCloud) return;
 
     const userPhone = phone || authService.getCurrentUser()?.phone;
@@ -171,11 +201,12 @@ export const cloudSyncService = {
       clearTimeout(autoSyncTimeout);
     }
 
+    localStorage.setItem('fazatak_has_pending_cloud_sync', 'true');
     notifySyncStatus('pending');
 
     autoSyncTimeout = setTimeout(async () => {
       autoSyncTimeout = null;
-      if (isSyncInProgress) return;
+      if (isSyncInProgress || isImportingCloud) return;
 
       isSyncInProgress = true;
       notifySyncStatus('syncing');
@@ -200,8 +231,8 @@ export const cloudSyncService = {
   },
 
   /**
-   * رفع وحفظ نسخة من بيانات ومعاملات العميل الحالية إلى السحابة
-   * مربوطة برقم هاتف العميل (ID المستخدم)
+   * رفع وحفظ نسخة كاملة من بيانات ومعاملات العميل الحالية إلى السحابة
+   * مربوطة برقم هاتف العميل
    */
   async backupUserToCloud(phone) {
     if (!phone) {
@@ -210,7 +241,8 @@ export const cloudSyncService = {
 
     try {
       const payload = await exportData();
-      const recordsCount = Object.values(payload.counts || {}).reduce((acc, c) => acc + c, 0);
+      const localBusinessCount = getBusinessRecordsCount(payload);
+      const totalRecordsCount = Object.values(payload.counts || {}).reduce((acc, c) => acc + c, 0);
 
       // 🛡️ حفظ فوري محلي في localStorage مرتبط برقم هاتف المستخدم (يدعم العمل بدون إنترنت)
       try {
@@ -220,28 +252,25 @@ export const cloudSyncService = {
       }
 
       if (!isSupabaseConfigured() || !supabase) {
-        return { success: true, localOnly: true, recordsCount };
+        return { success: true, localOnly: true, recordsCount: totalRecordsCount };
       }
 
-      // 🛡️ حماية كبرى: لا تسمح برفع قاعدة بيانات فارغة ومسح السحابة إذا كان لدى العميل بيانات سابقة بالسحابة
+      // 🛡️ الدرع الحديدي: منع مسح السحابة نهائياً إذا كانت القاعدة المحلية خالية من المعاملات
       const existingCloud = await this.getCloudBackup(phone);
-      if (existingCloud && (existingCloud.records_count || 0) > 0 && recordsCount === 0) {
-        console.warn(`🛑 [CloudSync] القاعدة المحلية فارغة والسحابة تحتوي على ${existingCloud.records_count} سجل للرقم ${phone}. جاري استرجاع بيانات العميل وحمايتها من المسح!`);
-        isImportingCloud = true;
-        try {
-          await this.safeMergeCloudData(existingCloud.backup_payload);
-          notifyDataChanged({ scope: 'all', action: 'prevent-wipe-restore' });
-          return { success: true, restoredFromCloud: true, recordsCount: existingCloud.records_count };
-        } finally {
-          isImportingCloud = false;
-        }
+      const cloudBusinessCount = getBusinessRecordsCount(existingCloud?.backup_payload);
+
+      if (localBusinessCount === 0 && cloudBusinessCount > 0) {
+        console.warn(`🛑 [Shield] تم إيقاف رفع قاعدة فارغة! السحابة تحتوي على ${cloudBusinessCount} معاملة للرقم ${phone}. جاري استرجاع معاملات العميل فوراً!`);
+        await this.restoreUserFromCloud(phone);
+        return { success: true, restoredFromCloud: true, recordsCount: existingCloud.records_count };
       }
 
+      const syncTime = new Date().toISOString();
       const record = {
         user_phone: phone,
         backup_payload: payload,
-        records_count: recordsCount,
-        updated_at: new Date().toISOString()
+        records_count: totalRecordsCount,
+        updated_at: syncTime
       };
 
       const { data, error } = await supabase
@@ -255,11 +284,23 @@ export const cloudSyncService = {
         return { success: false, error: error.message };
       }
 
-      const syncTime = data?.updated_at || new Date().toISOString();
-      localStorage.setItem(LAST_SYNC_KEY, syncTime);
+      // حفظ نسخة تاريخية في fazatak_backups إن وجدت معاملات فعلية
+      if (localBusinessCount > 0) {
+        supabase.from('fazatak_backups').insert([{
+          file_name: `CloudSync_${phone}_${Date.now()}.json`,
+          version: '2.0-offline',
+          records_count: totalRecordsCount,
+          tables_count: Object.keys(payload.tables || {}).length,
+          backup_data: payload
+        }]).then(() => {}).catch(() => {});
+      }
+
+      const confirmedTime = data?.updated_at || syncTime;
+      localStorage.setItem(LAST_SYNC_KEY, confirmedTime);
       localStorage.removeItem('fazatak_has_pending_cloud_sync');
       localStorage.setItem('fazatak_last_synced_mutation', Date.now().toString());
-      return { success: true, recordsCount, updatedAt: syncTime };
+
+      return { success: true, recordsCount: totalRecordsCount, updatedAt: confirmedTime };
     } catch (err) {
       console.error('[CloudSync] Unexpected error during cloud backup:', err);
       return { success: false, error: err.message };
@@ -292,68 +333,46 @@ export const cloudSyncService = {
   },
 
   /**
-   * مزامنة ذكية: دمج آمن بين السحابة والجهاز دون حذف أي بيانات
-   * مربوطة بهوية العميل (رقم الهاتف)
+   * مزامنة ذكية: مقارنة السحابة والمحلي ودمجهما دون فقدان أي بيانات
    */
   async syncWithCloud(phone) {
     if (!phone || isImportingCloud) return;
 
     try {
       const localPayload = await exportData();
-      const localCustomersCount = localPayload.tables?.customers?.length || 0;
+      const localBusinessCount = getBusinessRecordsCount(localPayload);
 
       const cloudRecord = await this.getCloudBackup(phone);
-      const cloudCustomersCount = cloudRecord?.backup_payload?.tables?.customers?.length || 0;
+      const cloudBusinessCount = getBusinessRecordsCount(cloudRecord?.backup_payload);
 
-      // 🛡️ حماية قصوى: إذا كان SQLite فارغاً لكن السحابة بها بيانات، استرجع فوراً دون أي تردد
-      if (localCustomersCount === 0 && cloudCustomersCount > 0) {
-        console.log(`[CloudSync] SQLite فارغة والسحابة تحتوي على بيانات (${cloudCustomersCount} عميل): جاري الاسترجاع الفوري...`);
-        isImportingCloud = true;
-        try {
-          await this.safeMergeCloudData(cloudRecord.backup_payload);
-          localStorage.setItem(LAST_SYNC_KEY, cloudRecord.updated_at);
-          localStorage.removeItem('fazatak_has_pending_cloud_sync');
-          notifySyncStatus('synced', {
-            lastSync: cloudRecord.updated_at,
-            recordsCount: cloudRecord.records_count
-          });
-          notifyDataChanged({ scope: 'all', action: 'cloud-auto-restore' });
-        } finally {
-          isImportingCloud = false;
-        }
+      // 🛡️ إذا كان المحلي خالياً من المعاملات والسحابة بها معاملات: استرجاع فوري
+      if (localBusinessCount === 0 && cloudBusinessCount > 0) {
+        console.log(`[CloudSync] الجهاز خالي من المعاملات والسحابة بها ${cloudBusinessCount} معاملة: استرجاع فوري...`);
+        await this.restoreUserFromCloud(phone);
         return;
       }
 
-      // فحص العمليات المعلقة بعد التأكد من أن المحلي ليس فارغاً في وجود سحابة ممتلئة
-      const hasPendingSync = localStorage.getItem('fazatak_has_pending_cloud_sync') === 'true';
-      const localLastMutation = Number(localStorage.getItem('fazatak_last_local_mutation') || 0);
-      const localLastSync = Number(new Date(localStorage.getItem(LAST_SYNC_KEY) || 0).getTime());
-
-      if (hasPendingSync || (localLastMutation > 0 && localLastMutation > localLastSync)) {
-        console.log('⚡ [CloudSync] اكتشاف عمليات محلية جديدة: رفع فوري للسحابة لحمايتها...');
+      // 🛡️ إذا كان المحلي به معاملات والسحابة خالية من المعاملات: رفع فوري لحمايتها
+      if (localBusinessCount > 0 && cloudBusinessCount === 0) {
+        console.log(`[CloudSync] الجهاز به ${localBusinessCount} معاملة والسحابة خالية: رفع فوري للسحابة...`);
         await this.backupUserToCloud(phone);
         return;
       }
 
       if (!cloudRecord || !cloudRecord.updated_at) return;
 
-      // إذا كان المحلي به بيانات والسحابة فارغة
-      if (localCustomersCount > 0 && cloudCustomersCount === 0) {
-        console.log('[CloudSync] المحلي به بيانات والسحابة فارغة: رفع البيانات للسحابة...');
-        await this.backupUserToCloud(phone);
-        return;
-      }
+      const localLastSyncStr = localStorage.getItem(LAST_SYNC_KEY);
+      const cloudTime = new Date(cloudRecord.updated_at).getTime();
+      const localSyncTime = localLastSyncStr ? new Date(localLastSyncStr).getTime() : 0;
 
-      const cloudDate = new Date(cloudRecord.updated_at).getTime();
-      const localDate = localLastSync;
-
-      // إذا كانت السحابة أحدث
-      if (cloudDate > localDate + 3000 && cloudRecord.backup_payload) {
-        console.log('[CloudSync] السحابة أحدث: دمج آمن في قاعدة البيانات المحلية...');
+      // إذا كانت السحابة أحدث بـ 2 ثوانٍ وبها معاملات: دمج ذكي
+      if (cloudTime > localSyncTime + 2000 && cloudRecord.backup_payload) {
+        console.log('[CloudSync] السحابة تحتوي على تحديثات أحدث من جهاز آخر: دمج ذكي...');
         isImportingCloud = true;
         try {
           await this.safeMergeCloudData(cloudRecord.backup_payload);
           localStorage.setItem(LAST_SYNC_KEY, cloudRecord.updated_at);
+          localStorage.setItem(`fazatak_user_cache_${phone}`, JSON.stringify(cloudRecord.backup_payload));
           notifySyncStatus('synced', {
             lastSync: cloudRecord.updated_at,
             recordsCount: cloudRecord.records_count
@@ -369,7 +388,7 @@ export const cloudSyncService = {
   },
 
   /**
-   * استرجاع وتطبيق بيانات ومعاملات العميل السحابية على المتصفح/الجهاز الحالي
+   * استرجاع وتطبيق بيانات ومعاملات العميل السحابية على المتصفح/الجهاز الحالي بالكامل
    */
   async restoreUserFromCloud(phone) {
     const cloudRecord = await this.getCloudBackup(phone);
@@ -379,13 +398,21 @@ export const cloudSyncService = {
 
     try {
       isImportingCloud = true;
-      await this.safeMergeCloudData(cloudRecord.backup_payload);
+      // استخدام importData الموثوق الذي يكتب جميع الجداول داخل Transaction واحدة مؤمنة
+      await importData(cloudRecord.backup_payload);
+      await persistWebStore();
+
       localStorage.setItem(LAST_SYNC_KEY, cloudRecord.updated_at);
+      localStorage.setItem(`fazatak_user_cache_${phone}`, JSON.stringify(cloudRecord.backup_payload));
+      localStorage.setItem('fazatak_current_db_phone', phone);
+      localStorage.removeItem('fazatak_has_pending_cloud_sync');
+
       notifySyncStatus('synced', {
         lastSync: cloudRecord.updated_at,
         recordsCount: cloudRecord.records_count
       });
       notifyDataChanged({ scope: 'all', action: 'cloud-restore' });
+
       return {
         success: true,
         recordsCount: cloudRecord.records_count,
@@ -400,76 +427,83 @@ export const cloudSyncService = {
   },
 
   /**
-   * عند تسجيل الدخول أو فتح التطبيق: فحص واسترجاع ذكي فوري برقم الهاتف
+   * المزامنة الشاملة عند تسجيل الدخول أو فتح التطبيق:
+   * تضمن تحميل كافة المعاملات من السحابة قبل الانتقال للواجهة الرئيسية
    */
-  async checkAndAutoRestoreOnLogin(phone) {
-    if (!phone) return { restored: false };
+  async fullSyncOnLogin(phone) {
+    if (!phone) return { success: false };
 
     try {
-      const localPayload = await exportData();
-      const localCustomersCount = localPayload.tables?.customers?.length || 0;
+      isImportingCloud = true;
 
-      // 1. أولاً: فحص كاش المستخدم المحلي في localStorage برقم هاتفه
+      const localPayload = await exportData();
+      const localBusinessCount = getBusinessRecordsCount(localPayload);
+
+      // هل هذا المتصفح كان مسجلاً برقم آخر؟
+      const lastDbPhone = localStorage.getItem('fazatak_current_db_phone');
+      const isUserSwitch = Boolean(lastDbPhone && lastDbPhone !== phone);
+
+      // 1. جلب بيانات السحابة للرقم الحالي
+      const cloudRecord = await this.getCloudBackup(phone);
+      const cloudBusinessCount = getBusinessRecordsCount(cloudRecord?.backup_payload);
+
+      // 2. إذا كانت السحابة تحتوي على معاملات: استرجاعها فوراً وبشكل حاسم
+      if (cloudBusinessCount > 0) {
+        if (isUserSwitch || localBusinessCount === 0 || cloudBusinessCount >= localBusinessCount) {
+          console.log(`[FullSyncOnLogin] جاري استرجاع ${cloudBusinessCount} معاملة من السحابة للرقم: ${phone}`);
+          await importData(cloudRecord.backup_payload);
+          await persistWebStore();
+          localStorage.setItem(LAST_SYNC_KEY, cloudRecord.updated_at);
+          localStorage.setItem(`fazatak_user_cache_${phone}`, JSON.stringify(cloudRecord.backup_payload));
+          localStorage.setItem('fazatak_current_db_phone', phone);
+          localStorage.removeItem('fazatak_has_pending_cloud_sync');
+
+          notifySyncStatus('synced', {
+            lastSync: cloudRecord.updated_at,
+            recordsCount: cloudRecord.records_count
+          });
+          notifyDataChanged({ scope: 'all', action: 'login-restore' });
+          return { success: true, restored: true, recordsCount: cloudRecord.records_count };
+        }
+      }
+
+      // 3. إذا كانت السحابة خالية ولكن الجهاز المحلي يحتوي على معاملات لنفس المستخدم: رفعها للسحابة لحمايتها
+      if (localBusinessCount > 0 && !isUserSwitch) {
+        console.log(`[FullSyncOnLogin] تم العثور على ${localBusinessCount} معاملة محلية والسحابة فارغة: رفع فوري لحمايتها...`);
+        await this.backupUserToCloud(phone);
+        localStorage.setItem('fazatak_current_db_phone', phone);
+        return { success: true, uploaded: true };
+      }
+
+      // 4. في حالة عدم وجود إنترنت ولكن يوجد كاش محلي سابق لنفس الرقم
       const cachedRaw = localStorage.getItem(`fazatak_user_cache_${phone}`);
       let cached = null;
       try { if (cachedRaw) cached = JSON.parse(cachedRaw); } catch {}
-      const cachedCustomersCount = cached?.tables?.customers?.length || 0;
+      const cachedBusinessCount = getBusinessRecordsCount(cached);
 
-      // إذا كانت قاعدة SQLite فارغة لكن يوجد كاش محلي محفوظ لهذا الرقم، استرجع فوراً!
-      if (localCustomersCount === 0 && cachedCustomersCount > 0) {
-        console.log(`[AutoRestore] SQLite فارغة، جاري الاستعادة فوراً من الكاش المحلي للمستخدم: ${phone}`);
-        isImportingCloud = true;
-        try {
-          await this.safeMergeCloudData(cached);
-          notifyDataChanged({ scope: 'all', action: 'cache-restore' });
-        } finally {
-          isImportingCloud = false;
-        }
+      if (localBusinessCount === 0 && cachedBusinessCount > 0) {
+        console.log(`[FullSyncOnLogin] استعادة من الكاش المحلي أوفلاين للرقم: ${phone}`);
+        await importData(cached);
+        await persistWebStore();
+        localStorage.setItem('fazatak_current_db_phone', phone);
+        notifyDataChanged({ scope: 'all', action: 'cache-restore' });
+        return { success: true, restoredFromCache: true };
       }
 
-      // 2. ثانياً: فحص السحابة Supabase لهذا الرقم
-      const cloudRecord = await this.getCloudBackup(phone);
-      if (cloudRecord && cloudRecord.backup_payload) {
-        const cloudCustomersCount = cloudRecord.backup_payload.tables?.customers?.length || 0;
-        
-        // إعادة فحص المحلي بعد احتمالية استرجاع الكاش
-        const currentPayload = await exportData();
-        const currentCustomersCount = currentPayload.tables?.customers?.length || 0;
-
-        if (currentCustomersCount === 0 && cloudCustomersCount > 0) {
-          console.log(`[AutoRestore] SQLite فارغة، جاري الاستعادة من سحابة Supabase للرقم: ${phone}`);
-          isImportingCloud = true;
-          try {
-            await this.safeMergeCloudData(cloudRecord.backup_payload);
-            localStorage.setItem(LAST_SYNC_KEY, cloudRecord.updated_at);
-            localStorage.removeItem('fazatak_has_pending_cloud_sync');
-            notifySyncStatus('synced', {
-              lastSync: cloudRecord.updated_at,
-              recordsCount: cloudRecord.records_count
-            });
-            notifyDataChanged({ scope: 'all', action: 'cloud-restore' });
-            return { restored: true, recordsCount: cloudRecord.records_count };
-          } finally {
-            isImportingCloud = false;
-          }
-        } else if (currentCustomersCount > 0 && cloudCustomersCount === 0) {
-          console.log(`[CloudSync] الجهاز به بيانات والسحابة فارغة: حفظ بالسحابة للرقم: ${phone}`);
-          await this.backupUserToCloud(phone);
-        } else if (currentCustomersCount > 0 && cloudCustomersCount > 0) {
-          await this.syncWithCloud(phone);
-        }
-      } else {
-        // لا يوجد سجل سحابي، إذا كان الجهاز به بيانات احفظها بالسحابة فوراً
-        const currentPayload = await exportData();
-        if ((currentPayload.tables?.customers?.length || 0) > 0) {
-          await this.backupUserToCloud(phone);
-        }
-      }
-
-      return { restored: false };
-    } catch (e) {
-      console.warn('[CloudSync] Auto restore check bypassed:', e);
-      return { restored: false };
+      localStorage.setItem('fazatak_current_db_phone', phone);
+      return { success: true, empty: true };
+    } catch (err) {
+      console.warn('[FullSyncOnLogin] Login sync note:', err);
+      return { success: false, error: err.message };
+    } finally {
+      isImportingCloud = false;
     }
+  },
+
+  /**
+   * الاسم القديم متوافقاً مع الاستدعاءات السابقة
+   */
+  async checkAndAutoRestoreOnLogin(phone) {
+    return this.fullSyncOnLogin(phone);
   }
 };
