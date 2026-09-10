@@ -6,7 +6,9 @@ import { PrivacyScreen } from '@capacitor-community/privacy-screen';
 import { Clipboard } from '@capacitor/clipboard';
 import { useLiveRefresh } from '../hooks/useLiveRefresh';
 import { cloudSyncService, SYNC_STATUS_EVENT, LAST_SYNC_KEY } from '../services/cloudSyncService';
-import BackupRestore from './BackupRestore';
+import { googleDriveService } from '../services/googleDriveService';
+import { importData, formatDate, formatFileSize } from '../services/backupService';
+import { notifyDataChanged } from '../services/dataEvents';
 
 const SUPPORT_PHONE_DISPLAY = '+966556854162';
 const SUPPORT_WHATSAPP_PHONE = '966556854162';
@@ -31,7 +33,71 @@ const ToggleItem = ({ title, description, value, onToggle, icon }) => (
 );
 
 const Settings = ({ onSettingsChange, onLicenseRenewed, currentUser, onLogout }) => {
-  const [showBackupModal, setShowBackupModal] = useState(false);
+  const [driveLoading, setDriveLoading] = useState('');
+  const [driveMessage, setDriveMessage] = useState('');
+  const [driveError, setDriveError] = useState('');
+  const [driveBackups, setDriveBackups] = useState([]);
+  const [showDriveRestoreModal, setShowDriveRestoreModal] = useState(false);
+  const [selectedBackupForRestore, setSelectedBackupForRestore] = useState(null);
+
+  const handleDriveUpload = async () => {
+    setDriveLoading('upload');
+    setDriveMessage('');
+    setDriveError('');
+    try {
+      const res = await googleDriveService.uploadBackup();
+      setDriveMessage(`تم حفظ النسخة بنجاح في حسابك بـ Google Drive (${res.recordsCount} سجل).`);
+    } catch (err) {
+      console.error('Google Drive backup error:', err);
+      setDriveError(err.message || 'فشل الرفع إلى Google Drive');
+    } finally {
+      setDriveLoading('');
+    }
+  };
+
+  const handleDriveRestoreClick = async () => {
+    setDriveLoading('list');
+    setDriveMessage('');
+    setDriveError('');
+    try {
+      const backups = await googleDriveService.listBackups(15);
+      if (!backups || backups.length === 0) {
+        setDriveError('لا توجد نسخ احتياطية لتطبيق فزتك على حساب Google Drive هذا.');
+        return;
+      }
+      setDriveBackups(backups);
+      setShowDriveRestoreModal(true);
+    } catch (err) {
+      console.error('Google Drive list error:', err);
+      setDriveError(err.message || 'تعذر جلب النسخ من Google Drive');
+    } finally {
+      setDriveLoading('');
+    }
+  };
+
+  const handleConfirmRestore = async (file) => {
+    if (!file) return;
+    setDriveLoading('restore');
+    setDriveError('');
+    try {
+      const payload = await googleDriveService.downloadBackup(file.id);
+      const res = await importData(payload);
+      notifyDataChanged({ scope: 'all', action: 'google-drive-restore' });
+      setShowDriveRestoreModal(false);
+      setSelectedBackupForRestore(null);
+      setDriveMessage(`تمت استعادة البيانات بنجاح (${res.recordsCount} سجل). جاري تحديث التطبيق...`);
+      setTimeout(() => {
+        window.location.reload();
+      }, 1000);
+    } catch (err) {
+      console.error('Google Drive restore error:', err);
+      setDriveError(err.message || 'فشلت عملية استعادة النسخة');
+      setSelectedBackupForRestore(null);
+    } finally {
+      setDriveLoading('');
+    }
+  };
+
   const [syncStatusText, setSyncStatusText] = useState('محفوظ مع السحابة تلقائياً ✓');
   const [isSyncingLive, setIsSyncingLive] = useState(false);
 
@@ -337,28 +403,58 @@ const Settings = ({ onSettingsChange, onLicenseRenewed, currentUser, onLogout })
         </div>
       )}
 
-      {/* ── Google Drive & Offline Backup Section ── */}
-      <div className="bg-slate-800 rounded-2xl p-6 border border-emerald-500/30 shadow-sm relative overflow-hidden">
+      {/* ── قسم النسخ والاسترجاع عبر Google Drive فقط ── */}
+      <div className="bg-gradient-to-br from-slate-800 to-slate-850 rounded-2xl p-5 border border-emerald-500/30 shadow-lg relative overflow-hidden">
         <div className="flex items-center justify-between mb-3">
-          <h3 className="text-lg font-bold text-white flex items-center gap-2">
-            <span>💾</span> النسخ الاحتياطي (Google Drive)
-          </h3>
-          <span className="text-[11px] px-2.5 py-0.5 rounded-full font-bold bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 flex items-center gap-1">
-            <span>📁</span> سحابي وأوفلاين
+          <div className="flex items-center gap-2.5">
+            <span className="w-9 h-9 rounded-xl bg-emerald-500/20 border border-emerald-500/30 flex items-center justify-center text-lg">
+              ☁️
+            </span>
+            <div>
+              <h3 className="text-base font-bold text-white">النسخ الاحتياطي عبر Google Drive</h3>
+              <p className="text-slate-400 text-xs mt-0.5">حفظ واسترجاع بضغطة زر واحدة لحسابك</p>
+            </div>
+          </div>
+          <span className="text-[10px] px-2.5 py-0.5 rounded-full font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/40">
+            Google Drive
           </span>
         </div>
-        <p className="text-slate-400 text-xs leading-relaxed mb-4">
-          يمكنك حفظ نسخة احتياطية مشفرة لجميع العملاء والعقود والأقساط مباشرة على حسابك في Google Drive أو استرجاعها بضغطة زر واحدة.
-        </p>
 
-        <button
-          type="button"
-          onClick={() => setShowBackupModal(true)}
-          className="w-full bg-gradient-to-r from-emerald-600 via-teal-600 to-emerald-700 hover:from-emerald-500 hover:to-teal-500 text-white font-bold py-3.5 px-4 rounded-xl shadow-lg shadow-emerald-600/25 flex items-center justify-center gap-2.5 transition-all active:scale-[0.98]"
-        >
-          <span className="text-xl">☁️</span>
-          <span>إدارة النسخ الاحتياطي (Google Drive)</span>
-        </button>
+        {driveMessage && (
+          <div className="mb-3 p-3 bg-emerald-500/15 border border-emerald-500/30 rounded-xl text-emerald-300 text-xs leading-5 flex items-center gap-2">
+            <span>✅</span>
+            <span>{driveMessage}</span>
+          </div>
+        )}
+
+        {driveError && (
+          <div className="mb-3 p-3 bg-rose-500/15 border border-rose-500/30 rounded-xl text-rose-300 text-xs leading-5 flex items-center gap-2">
+            <span>⚠️</span>
+            <span>{driveError}</span>
+          </div>
+        )}
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+          <button
+            type="button"
+            onClick={handleDriveUpload}
+            disabled={Boolean(driveLoading)}
+            className="w-full bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-bold py-3 px-4 rounded-xl shadow-md shadow-emerald-600/20 flex items-center justify-center gap-2 transition-all active:scale-[0.98] disabled:opacity-50"
+          >
+            <span className="text-lg">☁️</span>
+            <span>{driveLoading === 'upload' ? 'جاري الرفع إلى Drive...' : 'رفع إلى Google Drive'}</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={handleDriveRestoreClick}
+            disabled={Boolean(driveLoading)}
+            className="w-full bg-slate-700/80 hover:bg-slate-700 text-slate-100 font-bold py-3 px-4 rounded-xl border border-slate-600 shadow-md flex items-center justify-center gap-2 transition-all active:scale-[0.98] disabled:opacity-50"
+          >
+            <span className="text-lg">📥</span>
+            <span>{driveLoading === 'list' ? 'جاري جلب النسخ...' : 'استرجاع من Google Drive'}</span>
+          </button>
+        </div>
       </div>
 
       {/* License Section */}
@@ -611,10 +707,108 @@ const Settings = ({ onSettingsChange, onLicenseRenewed, currentUser, onLogout })
         <p>نظام فزتك (fazatak) - مزامنة سحابية آمنة ومشفرة</p>
       </div>
 
-      <BackupRestore
-        isOpen={showBackupModal}
-        onClose={() => setShowBackupModal(false)}
-      />
+      {/* ── نافذة اختيار نسخة Google Drive للاسترجاع ── */}
+      {showDriveRestoreModal && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4 modal-safe-area" dir="rtl">
+          <div className="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-md max-h-[85vh] flex flex-col p-5 shadow-2xl">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-800">
+              <div className="flex items-center gap-2">
+                <span className="text-xl">📥</span>
+                <h3 className="text-base font-bold text-white">النسخ في Google Drive</h3>
+              </div>
+              <button
+                onClick={() => {
+                  setShowDriveRestoreModal(false);
+                  setSelectedBackupForRestore(null);
+                }}
+                className="w-8 h-8 rounded-full text-slate-400 hover:text-white hover:bg-slate-800 grid place-items-center"
+              >
+                ✕
+              </button>
+            </div>
+
+            <p className="text-slate-400 text-xs py-3 leading-5">
+              اختر النسخة التي تود استعادتها لاستبدال البيانات الحالية:
+            </p>
+
+            <div className="flex-1 overflow-y-auto space-y-2 pr-1 custom-scrollbar max-h-64 my-1">
+              {driveBackups.map((item) => (
+                <div
+                  key={item.id}
+                  className="p-3 bg-slate-800/80 hover:bg-slate-800 border border-slate-700 rounded-xl transition-all flex items-center justify-between gap-3"
+                >
+                  <div className="overflow-hidden">
+                    <p className="text-sm font-bold text-white mb-0.5">
+                      {formatDate(item.createdTime || item.modifiedTime)}
+                    </p>
+                    <p className="text-xs text-slate-400 truncate font-mono" dir="ltr">
+                      {item.name} {item.size ? `(${formatFileSize(Number(item.size))})` : ''}
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setSelectedBackupForRestore(item)}
+                    disabled={driveLoading === 'restore'}
+                    className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-bold shrink-0 shadow transition-all active:scale-95"
+                  >
+                    استرجاع
+                  </button>
+                </div>
+              ))}
+            </div>
+
+            <div className="pt-3 border-t border-slate-800 flex justify-end">
+              <button
+                type="button"
+                onClick={() => {
+                  setShowDriveRestoreModal(false);
+                  setSelectedBackupForRestore(null);
+                }}
+                className="w-full py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-bold"
+              >
+                إغلاق
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── نافذة تأكيد الاسترجاع ── */}
+      {selectedBackupForRestore && (
+        <div className="fixed inset-0 bg-black/90 z-[60] flex items-center justify-center p-4 modal-safe-area" dir="rtl">
+          <div className="bg-slate-900 border border-rose-500/30 rounded-2xl w-full max-w-sm p-5 shadow-2xl">
+            <h4 className="text-base font-bold text-rose-300 mb-2 flex items-center gap-2">
+              <span>⚠️</span> تأكيد استرجاع النسخة
+            </h4>
+            <p className="text-slate-300 text-xs leading-6 mb-4">
+              سيتم استبدال البيانات الحالية على هذا الجهاز ببيانات النسخة المحددة:
+              <br />
+              <span className="text-white font-bold block mt-1">
+                تاريخ: {formatDate(selectedBackupForRestore.createdTime || selectedBackupForRestore.modifiedTime)}
+              </span>
+            </p>
+
+            <div className="flex gap-2.5">
+              <button
+                type="button"
+                onClick={() => setSelectedBackupForRestore(null)}
+                disabled={driveLoading === 'restore'}
+                className="flex-1 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl text-xs font-bold"
+              >
+                إلغاء
+              </button>
+              <button
+                type="button"
+                onClick={() => handleConfirmRestore(selectedBackupForRestore)}
+                disabled={driveLoading === 'restore'}
+                className="flex-1 py-2.5 bg-rose-600 hover:bg-rose-500 text-white rounded-xl text-xs font-bold shadow transition-all"
+              >
+                {driveLoading === 'restore' ? 'جاري الاستعادة...' : 'تأكيد الاسترجاع'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

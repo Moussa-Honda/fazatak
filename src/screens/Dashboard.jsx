@@ -591,15 +591,20 @@ const Dashboard = ({ isExpired, expiry, onReActivate, currentUser, onLogout }) =
   };
 
   return (
-    <div className="flex flex-col h-full bg-slate-900">
+    <div className="flex flex-col h-full max-h-full flex-1 min-h-0 w-full bg-slate-900 overflow-hidden relative">
       {/* ── Page content ── */}
-      <div className="flex-1 overflow-hidden">
+      <div className="flex-1 min-h-0 overflow-hidden relative">
         {renderContent()}
       </div>
 
       {/* ── Bottom Navigation ── */}
-      <nav className="bg-slate-900 border-t border-slate-700/50 shrink-0" style={{ paddingBottom: 'calc(env(safe-area-inset-bottom, 0px) + 12px)' }}>
-        <div className="flex justify-around items-stretch" style={{ height: '70px' }}>
+      <nav
+        className="bg-slate-900 border-t border-slate-700/50 shrink-0 z-30 relative"
+        style={{
+          paddingBottom: 'max(env(safe-area-inset-bottom, 0px), 8px)'
+        }}
+      >
+        <div className="flex justify-around items-stretch" style={{ height: '64px' }}>
           {tabs.map((tab) => {
             const active = activeTab === tab.id;
             return (
@@ -618,7 +623,7 @@ const Dashboard = ({ isExpired, expiry, onReActivate, currentUser, onLogout }) =
                   if (tab.id !== 'custody') setSelectedCustody(null);
                 }}
                 className="flex flex-col items-center justify-center gap-0.5 flex-1 relative px-1"
-                style={{ minHeight: '70px' }}
+                style={{ minHeight: '64px' }}
               >
                 {active && (
                   <span className="absolute top-0 left-1/2 -translate-x-1/2 w-8 h-[3px] rounded-full bg-blue-400" />
