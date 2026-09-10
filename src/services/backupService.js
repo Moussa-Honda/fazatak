@@ -454,6 +454,7 @@ export const getBusinessRecordsCount = (backupOrPayload) => {
   };
 
   return (
+    getCount('managers') +
     getCount('customers') +
     getCount('contracts') +
     getCount('installments') +

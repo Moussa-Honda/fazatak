@@ -268,13 +268,11 @@ const Dashboard = ({ isExpired, expiry, onReActivate, currentUser, onLogout }) =
       managerId: selectedManager?.id,
       custodyId: selectedCustody?.id
     });
-    refreshStats?.();
-    loadHomeAlerts();
 
     if (currentUser?.phone) {
       cloudSyncService.syncWithCloud(currentUser.phone).catch(() => {});
     }
-  }, [activeTab, selectedCustomer, selectedManager, selectedCustody, refreshStats, loadHomeAlerts, currentUser?.phone]);
+  }, [activeTab, selectedCustomer?.id, selectedManager?.id, selectedCustody?.id, currentUser?.phone]);
 
   const getRemainingDays = () => {
     if (isExpired) return 'منتهي (عرض فقط)';
@@ -488,7 +486,7 @@ const Dashboard = ({ isExpired, expiry, onReActivate, currentUser, onLogout }) =
                 </svg>
               </button>
               <div className="flex-1">
-                <h2 className="text-lg font-bold text-white">{selectedCustomer.name?.replace(/\s*0+$/g, '').trim() || 'عميل'}</h2>
+                <h2 className="text-lg font-bold text-white">{(String(selectedCustomer?.name || '')).replace(/\s*0+$/g, '').trim() || 'عميل'}</h2>
                 <p className="text-slate-400 text-sm">{selectedCustomer.phone}</p>
               </div>
               <div className="flex items-center gap-2">
@@ -540,13 +538,23 @@ const Dashboard = ({ isExpired, expiry, onReActivate, currentUser, onLogout }) =
             onRenewalRequest={() => setShowRenewal(true)} 
             managerId={selectedManager.id}
             managerName={selectedManager.name}
-            onBack={() => setSelectedManager(null)}
+            onBack={() => {
+              setSelectedCustomer(null);
+              setSelectedManager(null);
+            }}
           />
         ) : (
           <ManagerList 
             key="managers-list"
-            onSelectManager={setSelectedManager} 
-            onBack={() => setActiveTab('dashboard')} 
+            onSelectManager={(mgr) => {
+              setSelectedCustomer(null);
+              setSelectedManager(mgr);
+            }} 
+            onBack={() => {
+              setSelectedCustomer(null);
+              setSelectedManager(null);
+              setActiveTab('dashboard');
+            }} 
             isReadOnly={isExpired}
             onRenewalRequest={() => setShowRenewal(true)}
           />
@@ -562,7 +570,7 @@ const Dashboard = ({ isExpired, expiry, onReActivate, currentUser, onLogout }) =
                 </svg>
               </button>
               <div className="flex-1">
-                <h2 className="text-lg font-bold text-white">{selectedCustomer.name}</h2>
+                <h2 className="text-lg font-bold text-white">{(String(selectedCustomer?.name || '')).replace(/\s*0+$/g, '').trim() || 'عميل'}</h2>
                 <span className="text-[10px] bg-rose-500 text-white px-2 py-0.5 rounded-full">عميل متعثر ⚠️</span>
               </div>
               <div className="flex items-center gap-2">
@@ -601,14 +609,24 @@ const Dashboard = ({ isExpired, expiry, onReActivate, currentUser, onLogout }) =
             managerId={selectedManager.id}
             managerName={selectedManager.name}
             filterType="overdue"
-            onBack={() => setSelectedManager(null)}
+            onBack={() => {
+              setSelectedCustomer(null);
+              setSelectedManager(null);
+            }}
           />
         ) : (
           <ManagerList 
             key="debtors-list"
-            onSelectManager={setSelectedManager} 
+            onSelectManager={(mgr) => {
+              setSelectedCustomer(null);
+              setSelectedManager(mgr);
+            }} 
             filterType="overdue"
-            onBack={() => setActiveTab('dashboard')} 
+            onBack={() => {
+              setSelectedCustomer(null);
+              setSelectedManager(null);
+              setActiveTab('dashboard');
+            }} 
             isReadOnly={isExpired}
             onRenewalRequest={() => setShowRenewal(true)}
           />

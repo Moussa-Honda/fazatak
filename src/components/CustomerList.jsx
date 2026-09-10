@@ -122,14 +122,14 @@ const CustomerList = ({
         const shouldBeArchived = hasContracts && totalRemaining === 0;
 
         if (shouldBeArchived && customer.status === 'active') {
-          await customerService.update(customer.id, { status: 'archived' });
+          await customerService.update(customer.id, { status: 'archived' }, true);
           customer.status = 'archived';
         } else if (shouldBeActive && customer.status === 'archived') {
-          await customerService.update(customer.id, { status: 'active' });
+          await customerService.update(customer.id, { status: 'active' }, true);
           customer.status = 'active';
         } else if (!customer.status) {
           // Fix for any corrupted records (status is NULL)
-          await customerService.update(customer.id, { status: 'active' });
+          await customerService.update(customer.id, { status: 'active' }, true);
           customer.status = 'active';
         }
 
@@ -147,8 +147,6 @@ const CustomerList = ({
       setLoading(false);
     }
   };
-
-  useLiveRefresh(loadCustomers);
 
   const filterCustomers = () => {
     let result = customers;
@@ -254,8 +252,8 @@ const CustomerList = ({
             </svg>
           </button>
           <div className="flex-1">
-            <h2 className="text-xl font-black text-white">{managerName}</h2>
-            <p className="text-slate-400 text-xs">عملاء وعقود {managerName}</p>
+            <h2 className="text-xl font-black text-white">{managerName || 'حساب بالنيابة'}</h2>
+            <p className="text-slate-400 text-xs">عملاء وعقود {managerName || 'هذا الحساب'}</p>
           </div>
         </div>
       )}
@@ -402,7 +400,7 @@ const CustomerList = ({
                     </div>
                     {customer.is_deleted === 1 ? (
                       <p className="text-rose-500 text-xs font-bold mt-1">
-                        محذوف منذ: {customer.deleted_at ? customer.deleted_at.split(' ')[0] : 'غير معروف'}
+                        محذوف منذ: {typeof customer.deleted_at === 'string' ? customer.deleted_at.split(' ')[0] : (customer.deleted_at ? String(customer.deleted_at).split('T')[0] : 'غير معروف')}
                       </p>
                     ) : remainingBalance > 0 && (
                       <p className="text-slate-400 text-xs font-medium mt-1">

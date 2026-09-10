@@ -159,19 +159,19 @@ const ManagerList = ({ onSelectManager, onBack, filterType = 'all', isReadOnly =
                   <div className="bg-slate-900/50 rounded-2xl p-3 border border-slate-700/30">
                     <p className="text-[10px] text-slate-500 font-bold mb-1">إجمالي العقود</p>
                     <p className="text-sm font-black text-indigo-400">
-                      {Math.round(manager.total_contracts).toLocaleString('en-US')}
+                      {Math.round(Number(manager.total_contracts) || 0).toLocaleString('en-US')}
                     </p>
                   </div>
                   <div className="bg-slate-900/50 rounded-2xl p-3 border border-slate-700/30">
                     <p className="text-[10px] text-slate-500 font-bold mb-1">المدفوع</p>
                     <p className="text-sm font-black text-emerald-400">
-                      {Math.round(manager.total_paid).toLocaleString('en-US')}
+                      {Math.round(Number(manager.total_paid) || 0).toLocaleString('en-US')}
                     </p>
                   </div>
                   <div className="bg-slate-900/50 rounded-2xl p-3 border border-slate-700/30">
                     <p className="text-[10px] text-slate-500 font-bold mb-1">المتبقي</p>
                     <p className="text-sm font-black text-rose-400">
-                      {Math.round(manager.total_remaining).toLocaleString('en-US')}
+                      {Math.round(Number(manager.total_remaining) || 0).toLocaleString('en-US')}
                     </p>
                   </div>
                 </div>

@@ -512,6 +512,7 @@ export const customerService = {
   async getAll(activeOnly = false, managerId = null, includeDeleted = false) {
     const database = await getDatabase();
     let sql = `SELECT * FROM customers WHERE 1=1`;
+    const params = [];
     
     if (!includeDeleted) {
       sql += ` AND (is_deleted IS NULL OR is_deleted = 0)`;
@@ -520,12 +521,13 @@ export const customerService = {
     
     if (managerId === 'personal') {
       sql += ` AND (manager_id IS NULL OR manager_id = '' OR manager_id = 0)`;
-    } else if (managerId !== null && managerId !== undefined) {
-      sql += ` AND manager_id = ${managerId}`;
+    } else if (managerId !== null && managerId !== undefined && managerId !== '') {
+      sql += ` AND manager_id = ?`;
+      params.push(Number(managerId) || managerId);
     }
     
     sql += ` ORDER BY created_at DESC`;
-    const result = await database.query(sql);
+    const result = await database.query(sql, params);
     return result.values || [];
   },
 
@@ -535,7 +537,7 @@ export const customerService = {
     return result.values?.[0] || null;
   },
 
-  async update(id, customer) {
+  async update(id, customer, skipNotify = false) {
     const database = await getDatabase();
     // Prevent data loss by merging with existing data
     const existing = await this.getById(id);
@@ -561,7 +563,9 @@ export const customerService = {
       finalFlagged ? 1 : 0,
       id
     ]);
-    notifyDataChanged({ scope: 'customers', action: 'update', id });
+    if (!skipNotify) {
+      notifyDataChanged({ scope: 'customers', action: 'update', id });
+    }
   },
 
   async delete(id) {
@@ -1847,10 +1851,16 @@ export const managerService = {
     `;
     const result = await database.query(sql);
     
-    return (result.values || []).map(m => ({
-      ...m,
-      total_remaining: Math.max(0, m.total_contracts - m.total_paid)
-    }));
+    return (result.values || []).map(m => {
+      const contracts = Number(m.total_contracts) || 0;
+      const paid = Number(m.total_paid) || 0;
+      return {
+        ...m,
+        total_contracts: contracts,
+        total_paid: paid,
+        total_remaining: Math.max(0, contracts - paid)
+      };
+    });
   },
 
   async getById(id) {

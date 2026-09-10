@@ -4,6 +4,7 @@ import { defineCustomElements as jeepSqlite } from 'jeep-sqlite/loader'
 import { initDatabase } from './services/database.js'
 import './index.css'
 import App from './App.jsx'
+import ErrorBoundary from './components/ErrorBoundary.jsx'
 
 // Register jeep-sqlite web component for in-browser SQLite WebAssembly
 jeepSqlite(window)
@@ -55,7 +56,9 @@ const mountApp = async () => {
     if (rootEl) {
       createRoot(rootEl).render(
         <StrictMode>
-          <App />
+          <ErrorBoundary>
+            <App />
+          </ErrorBoundary>
         </StrictMode>,
       )
     }
