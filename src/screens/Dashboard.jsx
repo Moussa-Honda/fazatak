@@ -211,9 +211,23 @@ const Dashboard = ({ isExpired, expiry, onReActivate, currentUser, onLogout }) =
   const [selectedCustody, setSelectedCustody] = useState(null);
   const [selectedManager, setSelectedManager] = useState(null);
   const [showRenewal, setShowRenewal] = useState(false);
+  const [showCustodySection, setShowCustodySection] = useState(true);
   const [homeAlerts, setHomeAlerts] = useState({ late: [], today: [], upcoming: [], total: 0, totalAmount: 0 });
   const [homeAlertsLoading, setHomeAlertsLoading] = useState(true);
   const [selectedAlertType, setSelectedAlertType] = useState(null);
+
+  const loadDashboardSettings = useCallback(async () => {
+    try {
+      const showCustody = await settingsService.get('show_custody_section');
+      const isVisible = showCustody !== 'false';
+      setShowCustodySection(isVisible);
+      if (!isVisible) {
+        setActiveTab((prev) => (prev === 'custody' ? 'dashboard' : prev));
+      }
+    } catch (error) {
+      console.error('Error loading dashboard settings:', error);
+    }
+  }, []);
 
   const loadHomeAlerts = useCallback(async () => {
     try {
@@ -226,6 +240,12 @@ const Dashboard = ({ isExpired, expiry, onReActivate, currentUser, onLogout }) =
       setHomeAlertsLoading(false);
     }
   }, []);
+
+  useEffect(() => {
+    loadDashboardSettings();
+  }, [loadDashboardSettings]);
+
+  useLiveRefresh(loadDashboardSettings);
 
   useEffect(() => {
     loadHomeAlerts();
@@ -318,12 +338,14 @@ const Dashboard = ({ isExpired, expiry, onReActivate, currentUser, onLogout }) =
           d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
       </svg>
     )},
-    { id: 'custody', label: 'العهد', icon: (active) => (
-      <svg className="w-6 h-6" fill={active ? 'currentColor' : 'none'} stroke="currentColor" viewBox="0 0 24 24">
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8}
-          d="M17 9V7a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2m2 4h10a2 2 0 002-2v-6a2 2 0 00-2-2H9a2 2 0 00-2 2v6a2 2 0 002 2zm7-5a2 2 0 11-4 0 2 2 0 014 0z" />
-      </svg>
-    )},
+    ...(showCustodySection ? [{
+      id: 'custody', label: 'العهد', icon: (active) => (
+        <svg className="w-6 h-6" fill={active ? 'currentColor' : 'none'} stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8}
+            d="M17 9V7a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2m2 4h10a2 2 0 002-2v-6a2 2 0 00-2-2H9a2 2 0 00-2 2v6a2 2 0 002 2zm7-5a2 2 0 11-4 0 2 2 0 014 0z" />
+        </svg>
+      )
+    }] : []),
     { id: 'settings', label: 'الإعدادات', icon: (active) => (
       <svg className="w-6 h-6" fill={active ? 'currentColor' : 'none'} stroke="currentColor" viewBox="0 0 24 24">
         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8}
@@ -565,6 +587,7 @@ const Dashboard = ({ isExpired, expiry, onReActivate, currentUser, onLogout }) =
         );
 
       case 'custody':
+        if (!showCustodySection) return null;
         return selectedCustody ? (
           <CustodyDetails 
             custody={selectedCustody} 
@@ -579,7 +602,10 @@ const Dashboard = ({ isExpired, expiry, onReActivate, currentUser, onLogout }) =
         return <Settings 
           isReadOnly={isExpired} 
           onRenewalRequest={() => setShowRenewal(true)} 
-          onSettingsChange={loadHomeAlerts}
+          onSettingsChange={() => {
+            loadHomeAlerts();
+            loadDashboardSettings();
+          }}
           onLicenseRenewed={onReActivate}
           currentUser={currentUser}
           onLogout={onLogout}

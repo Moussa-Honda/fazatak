@@ -1630,6 +1630,7 @@ export const settingsService = {
   async set(key, value) {
     const database = await getDatabase();
     await database.run(`INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)`, [key, value]);
+    notifyDataChanged({ scope: 'settings', action: 'set', key });
   },
 
   async getWhatsAppTemplate() {

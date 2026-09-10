@@ -119,6 +119,7 @@ const Settings = ({ onSettingsChange, onLicenseRenewed, currentUser, onLogout })
     window.addEventListener(SYNC_STATUS_EVENT, handleSyncEvent);
     return () => window.removeEventListener(SYNC_STATUS_EVENT, handleSyncEvent);
   }, []);
+  const [showCustodySection, setShowCustodySection] = useState(true);
   const [quickPaymentMode, setQuickPaymentMode] = useState(false);
   const [privacyMode, setPrivacyMode] = useState(false);
   const [screenPrivacy, setScreenPrivacy] = useState(true);
@@ -148,7 +149,8 @@ const Settings = ({ onSettingsChange, onLicenseRenewed, currentUser, onLogout })
       const [
         quick, privacy, screenPrivacyValue,
         bizName, bizContact, taxNo, showPdf, overThreshold, stagThreshold,
-        notifEnabled, notifDays, notifTime, notifOverdue, whatsappText
+        notifEnabled, notifDays, notifTime, notifOverdue, whatsappText,
+        showCustody
       ] = await Promise.all([
         settingsService.get('quick_payment_mode'),
         settingsService.get('privacy_mode'),
@@ -163,9 +165,11 @@ const Settings = ({ onSettingsChange, onLicenseRenewed, currentUser, onLogout })
         settingsService.get('installment_notification_days_before'),
         settingsService.get('installment_notification_time'),
         settingsService.get('installment_overdue_notifications_enabled'),
-        settingsService.getWhatsAppTemplate()
+        settingsService.getWhatsAppTemplate(),
+        settingsService.get('show_custody_section')
       ]);
       
+      setShowCustodySection(showCustody !== 'false');
       setQuickPaymentMode(quick === 'true');
       setPrivacyMode(privacy === 'true');
       setScreenPrivacy(screenPrivacyValue !== 'false');
@@ -510,6 +514,7 @@ const Settings = ({ onSettingsChange, onLicenseRenewed, currentUser, onLogout })
         <ToggleItem title="وضع الخصوصية" description="إخفاء الأرقام المالية" value={privacyMode} onToggle={() => toggleSetting('privacy_mode', privacyMode, setPrivacyMode)} icon="🔒" />
         <ToggleItem title="حماية الشاشة" description="منع لقطات الشاشة وتسجيل الفيديو" value={screenPrivacy} onToggle={() => toggleSetting('screen_privacy', screenPrivacy, setScreenPrivacy)} icon="📸" />
         <ToggleItem title="التاريخ الهجري" description="عرض التاريخ الهجري" value={hijriCalendar} onToggle={() => toggleSetting('hijri_calendar', hijriCalendar, setHijriCalendar)} icon="📅" />
+        <ToggleItem title="قسم العهد" description="إظهار قسم العهد في الشريط السفلي" value={showCustodySection} onToggle={() => toggleSetting('show_custody_section', showCustodySection, setShowCustodySection)} icon="💼" />
       </div>
 
       {/* Business Details Section */}
