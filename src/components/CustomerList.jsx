@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { customerService, contractService, settingsService } from '../services/database';
 import CustomerModal from './CustomerModal';
 import ContractModal from './ContractModal';
@@ -69,17 +69,7 @@ const CustomerList = ({
   const themeBorder = managerId ? 'focus:border-indigo-500' : 'focus:border-blue-500';
   const themeShadow = managerId ? 'shadow-indigo-600/30' : 'shadow-blue-600/30';
 
-  useEffect(() => {
-    loadCustomers();
-  }, [managerId, filterType]);
-
-  useLiveRefresh(loadCustomers);
-
-  useEffect(() => {
-    filterCustomers();
-  }, [customers, search, activeTab, overdueStatus, filterType]);
-
-  const loadCustomers = async () => {
+  const loadCustomers = useCallback(async () => {
     setLoading(true);
     try {
       const [isRecycleBinEnabled, overdueThresholdSetting] = await Promise.all([
@@ -146,9 +136,15 @@ const CustomerList = ({
     } finally {
       setLoading(false);
     }
-  };
+  }, [managerId, filterType]);
 
-  const filterCustomers = () => {
+  useEffect(() => {
+    loadCustomers();
+  }, [loadCustomers]);
+
+  useLiveRefresh(loadCustomers);
+
+  const filterCustomers = useCallback(() => {
     let result = customers;
     
     if (filterType === 'overdue') {
@@ -168,7 +164,11 @@ const CustomerList = ({
     }
     
     setFiltered(result);
-  };
+  }, [customers, search, activeTab, overdueStatus, filterType]);
+
+  useEffect(() => {
+    filterCustomers();
+  }, [filterCustomers]);
 
   const handleAddCustomer = () => {
     if (isReadOnly) return onRenewalRequest?.();
