@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { managerService } from '../services/database';
 import ManagerModal from './ManagerModal';
 import { useLiveRefresh } from '../hooks/useLiveRefresh';
@@ -8,11 +8,7 @@ const ManagerList = ({ onSelectManager, onBack, filterType = 'all', isReadOnly =
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
 
-  useEffect(() => {
-    loadManagers();
-  }, [filterType]);
-
-  const loadManagers = async () => {
+  const loadManagers = useCallback(async () => {
     setLoading(true);
     try {
       let data;
@@ -27,7 +23,11 @@ const ManagerList = ({ onSelectManager, onBack, filterType = 'all', isReadOnly =
     } finally {
       setLoading(false);
     }
-  };
+  }, [filterType]);
+
+  useEffect(() => {
+    loadManagers();
+  }, [loadManagers]);
 
   useLiveRefresh(loadManagers);
 

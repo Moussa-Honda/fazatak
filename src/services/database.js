@@ -758,7 +758,7 @@ export const customerService = {
       const activeCount = result.values?.[0]?.active_count ?? 1;
 
       if (activeCount === 0 && customer.status === 'active') {
-        await db.run(`UPDATE customers SET status = 'archived' WHERE id = ?`, [customerId]);
+        await database.run(`UPDATE customers SET status = 'archived' WHERE id = ?`, [customerId]);
         console.log(`Customer ${customerId} auto-archived after early settlement.`);
         notifyDataChanged({ scope: 'customers', action: 'archive', id: customerId });
       }

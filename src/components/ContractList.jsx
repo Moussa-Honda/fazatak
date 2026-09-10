@@ -1,4 +1,4 @@
-import { useState, useEffect, Fragment } from 'react';
+import { useState, useEffect, useCallback, Fragment } from 'react';
 import { contractService, installmentService, customerService, settingsService } from '../services/database';
 import { notificationService } from '../services/notificationService';
 import { toHijriDate } from '../utils/dateUtils';
@@ -178,14 +178,8 @@ const ContractList = ({ customerId, isReadOnly, onRenewalRequest, themeColor = '
   const [selectedContract, setSelectedContract] = useState(null);
   const [pdfLoading, setPdfLoading] = useState(null); // tracks contract.id being exported
 
-  useEffect(() => {
-    if (customerId) {
-      loadData();
-      loadSettings();
-    }
-  }, [customerId]);
-
-  const loadData = async () => {
+  const loadData = useCallback(async () => {
+    if (!customerId) return;
     setLoading(true);
     const [contractsData, customerData] = await Promise.all([
       contractService.getByCustomerId(customerId),
@@ -194,9 +188,9 @@ const ContractList = ({ customerId, isReadOnly, onRenewalRequest, themeColor = '
     setContracts(contractsData);
     setCustomer(customerData);
     setLoading(false);
-  };
+  }, [customerId]);
 
-  const loadSettings = async () => {
+  const loadSettings = useCallback(async () => {
     const quick = await settingsService.get('quick_payment_mode');
     const hijri = await settingsService.get('hijri_calendar');
     const privacy = await settingsService.get('privacy_mode');
@@ -207,14 +201,21 @@ const ContractList = ({ customerId, isReadOnly, onRenewalRequest, themeColor = '
     setPrivacyMode(privacy === 'true');
     setAutoAppendIban(autoIban === 'true');
     setIbanNumber(iban || '');
-  };
+  }, []);
 
-  const refreshContractInstallments = async (contractId) => {
+  const refreshContractInstallments = useCallback(async (contractId) => {
     if (!contractId) return;
 
     const data = await installmentService.getByContractId(contractId);
     setInstallments(prev => ({ ...prev, [contractId]: data }));
-  };
+  }, []);
+
+  useEffect(() => {
+    if (customerId) {
+      loadData();
+      loadSettings();
+    }
+  }, [customerId, loadData, loadSettings]);
 
   useLiveRefresh(() => {
     if (!customerId) return;

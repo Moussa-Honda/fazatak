@@ -15,15 +15,31 @@ class ErrorBoundary extends React.Component {
     this.setState({ errorInfo });
   }
 
-  handleReset = () => {
+  handleReset = async () => {
     this.setState({ hasError: false, error: null, errorInfo: null });
+    try {
+      if (typeof window !== 'undefined' && 'caches' in window) {
+        const keys = await window.caches.keys();
+        await Promise.all(keys.map((k) => window.caches.delete(k)));
+      }
+      if (typeof navigator !== 'undefined' && 'serviceWorker' in navigator) {
+        const regs = await navigator.serviceWorker.getRegistrations();
+        await Promise.all(regs.map((r) => r.update()));
+      }
+    } catch (e) {
+      console.warn('ErrorBoundary cache clear error:', e);
+    }
     window.location.reload();
   };
 
-  handleGoHome = () => {
+  handleGoHome = async () => {
     this.setState({ hasError: false, error: null, errorInfo: null });
     try {
       localStorage.removeItem('fazatak_active_tab');
+      if (typeof window !== 'undefined' && 'caches' in window) {
+        const keys = await window.caches.keys();
+        await Promise.all(keys.map((k) => window.caches.delete(k)));
+      }
     } catch {}
     window.location.href = '/';
   };
