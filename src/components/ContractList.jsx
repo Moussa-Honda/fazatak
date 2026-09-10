@@ -509,7 +509,7 @@ const ContractList = ({ customerId, isReadOnly, onRenewalRequest, themeColor = '
                   </div>
                 )}
 
-                <div className="grid grid-cols-3 gap-2 text-sm mb-3">
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-sm mb-3">
                   <div className="bg-slate-900/50 rounded-lg p-2">
                     <p className="text-slate-500 text-xs">رأس المال</p>
                     <p className="text-amber-400 font-medium">{formatAmount(contract.capital_amount)}</p>
@@ -517,6 +517,10 @@ const ContractList = ({ customerId, isReadOnly, onRenewalRequest, themeColor = '
                   <div className="bg-slate-900/50 rounded-lg p-2">
                     <p className="text-slate-500 text-xs">إجمالي التقسيط</p>
                     <p className="text-white font-medium">{formatAmount(contract.total_amount)}</p>
+                  </div>
+                  <div className="bg-slate-900/50 rounded-lg p-2">
+                    <p className="text-slate-500 text-xs">المدفوع</p>
+                    <p className="text-emerald-400 font-medium">{formatAmount(contract.total_paid || 0)}</p>
                   </div>
                   <div className="bg-slate-900/50 rounded-lg p-2">
                     <p className="text-slate-500 text-xs">المتبقي</p>
