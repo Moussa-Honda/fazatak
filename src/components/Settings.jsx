@@ -363,7 +363,7 @@ const Settings = ({ onSettingsChange, onLicenseRenewed, currentUser, onLogout })
             )}
           </div>
 
-          <div className="bg-slate-950/60 rounded-xl p-3 border border-slate-800 space-y-2 mb-4 text-xs">
+          <div className="bg-slate-950/60 rounded-xl p-3 border border-slate-800 space-y-2 mb-0 text-xs">
             <div className="flex justify-between items-center">
               <span className="text-slate-400">حالة الاشتراك السحابي:</span>
               <span className="px-2.5 py-0.5 rounded-full font-bold text-[11px] bg-emerald-500/20 text-emerald-400 border border-emerald-500/40">
@@ -378,27 +378,6 @@ const Settings = ({ onSettingsChange, onLicenseRenewed, currentUser, onLogout })
                 </span>
               </div>
             )}
-          </div>
-
-          <div className="bg-slate-950/60 rounded-xl p-3.5 border border-emerald-500/30 space-y-2 text-xs">
-            <div className="flex items-center justify-between">
-              <span className="text-slate-200 font-bold flex items-center gap-2">
-                <span className={`w-2.5 h-2.5 rounded-full ${isSyncingLive ? 'bg-amber-400 animate-ping' : 'bg-emerald-400'}`} />
-                <span>المزامنة السحابية الفورية:</span>
-              </span>
-              <span className="px-2.5 py-0.5 rounded-full font-bold text-[11px] bg-emerald-500/20 text-emerald-400 border border-emerald-500/40">
-                {isSyncingLive ? 'جاري الحفظ...' : 'نشطة وتلقائية'}
-              </span>
-            </div>
-            <p className="text-slate-400 text-[11px] leading-relaxed">
-              جميع العقود والعملاء والأقساط تُحفظ سحابياً في حسابك تلقائياً وبشكل فوري بمجرد إضافتها، وتظهر تلقائياً على أي جهاز تسجل منه برقم هاتفك.
-            </p>
-            <div className="pt-2 border-t border-slate-800 flex justify-between items-center text-[10px] text-slate-400">
-              <span>حالة الحفظ التلقائي:</span>
-              <span className="text-emerald-300 font-medium">
-                {syncStatusText}
-              </span>
-            </div>
           </div>
         </div>
       )}
