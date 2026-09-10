@@ -6,6 +6,7 @@ import { PrivacyScreen } from '@capacitor-community/privacy-screen';
 import { Clipboard } from '@capacitor/clipboard';
 import { useLiveRefresh } from '../hooks/useLiveRefresh';
 import { cloudSyncService, SYNC_STATUS_EVENT, LAST_SYNC_KEY } from '../services/cloudSyncService';
+import BackupRestore from './BackupRestore';
 
 const SUPPORT_PHONE_DISPLAY = '+966556854162';
 const SUPPORT_WHATSAPP_PHONE = '966556854162';
@@ -30,6 +31,7 @@ const ToggleItem = ({ title, description, value, onToggle, icon }) => (
 );
 
 const Settings = ({ onSettingsChange, onLicenseRenewed, currentUser, onLogout }) => {
+  const [showBackupModal, setShowBackupModal] = useState(false);
   const [syncStatusText, setSyncStatusText] = useState('محفوظ مع السحابة تلقائياً ✓');
   const [isSyncingLive, setIsSyncingLive] = useState(false);
 
@@ -335,6 +337,30 @@ const Settings = ({ onSettingsChange, onLicenseRenewed, currentUser, onLogout })
         </div>
       )}
 
+      {/* ── Google Drive & Offline Backup Section ── */}
+      <div className="bg-slate-800 rounded-2xl p-6 border border-emerald-500/30 shadow-sm relative overflow-hidden">
+        <div className="flex items-center justify-between mb-3">
+          <h3 className="text-lg font-bold text-white flex items-center gap-2">
+            <span>💾</span> النسخ الاحتياطي (Google Drive)
+          </h3>
+          <span className="text-[11px] px-2.5 py-0.5 rounded-full font-bold bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 flex items-center gap-1">
+            <span>📁</span> سحابي وأوفلاين
+          </span>
+        </div>
+        <p className="text-slate-400 text-xs leading-relaxed mb-4">
+          يمكنك حفظ نسخة احتياطية مشفرة لجميع العملاء والعقود والأقساط مباشرة على حسابك في Google Drive أو استرجاعها بضغطة زر واحدة.
+        </p>
+
+        <button
+          type="button"
+          onClick={() => setShowBackupModal(true)}
+          className="w-full bg-gradient-to-r from-emerald-600 via-teal-600 to-emerald-700 hover:from-emerald-500 hover:to-teal-500 text-white font-bold py-3.5 px-4 rounded-xl shadow-lg shadow-emerald-600/25 flex items-center justify-center gap-2.5 transition-all active:scale-[0.98]"
+        >
+          <span className="text-xl">☁️</span>
+          <span>إدارة النسخ الاحتياطي (Google Drive)</span>
+        </button>
+      </div>
+
       {/* License Section */}
       <div className="bg-slate-800 rounded-2xl p-6 border border-slate-700 shadow-sm">
         <h3 className="text-lg font-bold text-white mb-4 flex items-center gap-2">الاشتراك والجهاز</h3>
@@ -584,6 +610,11 @@ const Settings = ({ onSettingsChange, onLicenseRenewed, currentUser, onLogout })
       <div className="text-center text-slate-500 text-sm pt-4">
         <p>نظام فزتك (fazatak) - مزامنة سحابية آمنة ومشفرة</p>
       </div>
+
+      <BackupRestore
+        isOpen={showBackupModal}
+        onClose={() => setShowBackupModal(false)}
+      />
     </div>
   );
 };

@@ -18,6 +18,7 @@ import {
   listCloudBackups,
   getCloudBackupById
 } from '../services/supabase';
+import { googleDriveService } from '../services/googleDriveService';
 
 const BackupRestore = ({ isOpen, onClose }) => {
   const fileInputRef = useRef(null);
@@ -28,6 +29,8 @@ const BackupRestore = ({ isOpen, onClose }) => {
   const [pendingRestore, setPendingRestore] = useState(null);
   const [cloudBackups, setCloudBackups] = useState([]);
   const [showCloudModal, setShowCloudModal] = useState(false);
+  const [googleDriveBackups, setGoogleDriveBackups] = useState([]);
+  const [showGoogleDriveModal, setShowGoogleDriveModal] = useState(false);
 
   async function refreshBackupInfo() {
     const info = await checkBackupExists();
@@ -143,6 +146,36 @@ const BackupRestore = ({ isOpen, onClose }) => {
     });
   };
 
+  const handleGoogleDriveBackup = async () => {
+    const result = await runAction('google-drive-backup', async () => {
+      return await googleDriveService.uploadBackup();
+    });
+    if (result?.success) {
+      setMessage(`تم حفظ النسخة بنجاح على حساب Google Drive الخاص بك (${result.recordsCount} سجل).`);
+    }
+  };
+
+  const handleGoogleDriveRestoreClick = async () => {
+    const backups = await runAction('google-drive-list', async () => {
+      return await googleDriveService.listBackups(10);
+    });
+    if (!backups || backups.length === 0) {
+      setError('لا توجد نسخ احتياطية لتطبيق فزتك على حساب Google Drive هذا.');
+      return;
+    }
+    setGoogleDriveBackups(backups);
+    setShowGoogleDriveModal(true);
+  };
+
+  const handleSelectGoogleDriveItem = (item) => {
+    setShowGoogleDriveModal(false);
+    setPendingRestore({
+      type: 'google-drive',
+      fileId: item.id,
+      fileName: `Google Drive (${formatDate(item.createdTime || item.modifiedTime)}) - ${item.name}`
+    });
+  };
+
   const confirmRestore = async () => {
     if (!pendingRestore) return;
 
@@ -156,6 +189,10 @@ const BackupRestore = ({ isOpen, onClose }) => {
       if (restoreSource.type === 'cloud') {
         const cloudData = await getCloudBackupById(restoreSource.cloudId);
         return importData(cloudData);
+      }
+      if (restoreSource.type === 'google-drive') {
+        const driveData = await googleDriveService.downloadBackup(restoreSource.fileId);
+        return importData(driveData);
       }
 
       return restoreBackup();
@@ -317,6 +354,38 @@ const BackupRestore = ({ isOpen, onClose }) => {
               </button>
             </div>
           </div>
+
+          {/* قسم Google Drive */}
+          <div className="pt-4 mt-2 border-t border-slate-800 space-y-3">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-bold text-slate-300 flex items-center gap-1.5">
+                <span className="text-base">📁</span> النسخ على Google Drive
+              </span>
+              <span className="text-[11px] px-2 py-0.5 rounded-full font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                متصل بـ Google
+              </span>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <button
+                onClick={handleGoogleDriveBackup}
+                disabled={isBusy}
+                className="bg-emerald-600 hover:bg-emerald-500 text-white py-3 px-3 rounded-xl font-bold text-xs disabled:opacity-40 flex items-center justify-center gap-1.5 shadow-lg shadow-emerald-600/20 transition-all active:scale-[0.98]"
+              >
+                <span>☁️</span>
+                {loading === 'google-drive-backup' ? 'جاري الرفع...' : 'رفع إلى Drive'}
+              </button>
+
+              <button
+                onClick={handleGoogleDriveRestoreClick}
+                disabled={isBusy}
+                className="bg-teal-600 hover:bg-teal-500 text-white py-3 px-3 rounded-xl font-bold text-xs disabled:opacity-40 flex items-center justify-center gap-1.5 shadow-lg shadow-teal-600/20 transition-all active:scale-[0.98]"
+              >
+                <span>📥</span>
+                {loading === 'google-drive-list' ? 'جاري الفحص...' : 'استرجاع من Drive'}
+              </button>
+            </div>
+          </div>
         </div>
 
         <input
@@ -403,7 +472,56 @@ const BackupRestore = ({ isOpen, onClose }) => {
               onClick={() => setShowCloudModal(false)}
               className="w-full py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-sm font-bold"
             >
-              إغلاق
+              إلغاء
+            </button>
+          </div>
+        </div>
+      )}
+
+      {showGoogleDriveModal && (
+        <div className="fixed inset-0 bg-black/90 z-[60] flex items-center justify-center p-4 modal-safe-area" dir="rtl">
+          <div className="bg-slate-900 border border-emerald-500/30 rounded-2xl w-full max-w-md p-6 shadow-2xl">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-bold text-white flex items-center gap-2">
+                <span>📁</span> نسخ Google Drive
+              </h3>
+              <button
+                onClick={() => setShowGoogleDriveModal(false)}
+                className="w-8 h-8 rounded-full text-slate-400 hover:text-white hover:bg-slate-800 grid place-items-center"
+              >
+                ✕
+              </button>
+            </div>
+
+            <p className="text-slate-400 text-xs mb-4">
+              اختر النسخة التي تريد استرجاعها من حسابك في Google Drive:
+            </p>
+
+            <div className="space-y-2 max-h-64 overflow-y-auto mb-5 pr-1 custom-scrollbar">
+              {googleDriveBackups.map((item) => (
+                <div
+                  key={item.id}
+                  onClick={() => handleSelectGoogleDriveItem(item)}
+                  className="p-3 bg-slate-800/80 hover:bg-slate-800 border border-slate-700/80 hover:border-emerald-500/60 rounded-xl cursor-pointer transition-all flex items-center justify-between"
+                >
+                  <div className="overflow-hidden">
+                    <p className="text-sm font-bold text-white mb-0.5 truncate">{formatDate(item.createdTime || item.modifiedTime)}</p>
+                    <p className="text-xs text-slate-400 truncate" dir="ltr">
+                      {item.name} {item.size ? `(${formatFileSize(Number(item.size))})` : ''}
+                    </p>
+                  </div>
+                  <span className="text-xs bg-emerald-500/20 text-emerald-300 px-2.5 py-1 rounded-lg font-bold shrink-0 mr-2">
+                    استرجاع
+                  </span>
+                </div>
+              ))}
+            </div>
+
+            <button
+              onClick={() => setShowGoogleDriveModal(false)}
+              className="w-full py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-sm font-bold"
+            >
+              إلغاء
             </button>
           </div>
         </div>
