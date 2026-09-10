@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { contractService, installmentService, customerService, settingsService } from '../services/database';
 import { notificationService } from '../services/notificationService';
 import { getDefaultDueDate } from '../utils/dateUtils';
@@ -15,6 +15,7 @@ const getPaidAmount = (installment) => {
 };
 
 const ContractModal = ({ isOpen, onClose, onSave, customerId, customerName, isBlacklisted, contract = null, themeColor = 'blue' }) => {
+  const guarantorNameInputRef = useRef(null);
   const themeBg = themeColor === 'indigo' ? 'bg-indigo-600' : 'bg-emerald-600';
   const themeFocus = themeColor === 'indigo' ? 'focus:border-indigo-500' : 'focus:border-blue-500';
   const themeShadow = themeColor === 'indigo' ? 'shadow-indigo-600/30' : 'shadow-emerald-600/30';
@@ -478,16 +479,22 @@ const ContractModal = ({ isOpen, onClose, onSave, customerId, customerName, isBl
               <button
                 type="button"
                 onClick={handlePickGuarantorContact}
-                className="text-xs bg-indigo-500/20 hover:bg-indigo-500/30 text-indigo-300 border border-indigo-500/40 px-2.5 py-1.5 rounded-lg font-bold flex items-center gap-1.5 transition-colors"
+                className="text-xs bg-indigo-500/20 hover:bg-indigo-500/30 text-indigo-300 border border-indigo-500/40 px-3 py-1.5 rounded-lg font-bold flex items-center gap-1.5 transition-colors"
               >
-                <span>📇</span>
-                <span>استرداد من جهات الاتصال</span>
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197m13.5-9a2.5 2.5 0 11-5 0 2.5 2.5 0 015 0z" />
+                </svg>
+                <span>إضافة من جهات الاتصال</span>
               </button>
             </div>
             
             <div className="space-y-3">
               <input
+                ref={guarantorNameInputRef}
                 type="text"
+                name="guarantor_name"
+                id="guarantor-name"
+                autoComplete="name"
                 value={formData.guarantor_name}
                 onChange={(e) => setFormData({ ...formData, guarantor_name: e.target.value })}
                 className="w-full bg-slate-900 border border-slate-600 rounded-xl px-4 py-3 text-white placeholder-slate-500 focus:border-indigo-500 focus:outline-none transition-colors"
@@ -496,6 +503,9 @@ const ContractModal = ({ isOpen, onClose, onSave, customerId, customerName, isBl
               
               <input
                 type="tel"
+                name="guarantor_tel"
+                id="guarantor-tel"
+                autoComplete="tel"
                 value={formData.guarantor_phone}
                 onChange={(e) => setFormData({ ...formData, guarantor_phone: e.target.value })}
                 onBlur={(e) => {
@@ -525,7 +535,13 @@ const ContractModal = ({ isOpen, onClose, onSave, customerId, customerName, isBl
       isOpen={showGuarantorPicker}
       onClose={() => setShowGuarantorPicker(false)}
       onSelectContact={handleGuarantorSelected}
-      title="استرداد بيانات الكفيل من جهات الاتصال"
+      onFocusForm={() => {
+        setShowGuarantorPicker(false);
+        setTimeout(() => {
+          guarantorNameInputRef.current?.focus();
+        }, 150);
+      }}
+      title="إضافة الكفيل من جهات الاتصال"
     />
   </>
   );

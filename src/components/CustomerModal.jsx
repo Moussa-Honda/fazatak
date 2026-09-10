@@ -1,10 +1,11 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { customerService } from '../services/database';
 import { sanitizePhoneNumber } from '../utils/phoneUtils';
 import { isWebContactsSupported, isNativePlatform, pickContactDirectly } from '../services/contactService';
 import ContactPickerModal from './ContactPickerModal';
 
 const CustomerModal = ({ isOpen, onClose, onSave, customer = null, managerId = null, themeColor = 'blue' }) => {
+  const nameInputRef = useRef(null);
   const themeBg = themeColor === 'indigo' ? 'bg-indigo-600' : 'bg-blue-600';
   const themeFocus = themeColor === 'indigo' ? 'focus:border-indigo-500' : 'focus:border-blue-500';
   const themeShadow = themeColor === 'indigo' ? 'shadow-indigo-600/30' : 'shadow-blue-600/30';
@@ -111,32 +112,26 @@ const CustomerModal = ({ isOpen, onClose, onSave, customer = null, managerId = n
 
           <form onSubmit={handleSubmit} className="p-6 space-y-4 overflow-y-auto custom-scrollbar">
             {!customer && (
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={handlePickContact}
-                  className="flex-1 bg-blue-600/20 border border-blue-500/50 text-blue-400 py-3 rounded-xl font-medium btn-press flex items-center justify-center gap-2 hover:bg-blue-600/30 transition-colors"
-                >
-                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197m13.5-9a2.5 2.5 0 11-5 0 2.5 2.5 0 015 0z" />
-                  </svg>
-                  اختيار من جهات الاتصال
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setShowContactPicker(true)}
-                  title="خيارات استرداد متقدمة (ملف VCF أو لصق ذكي)"
-                  className="p-3 bg-slate-700/80 hover:bg-slate-700 border border-slate-600 text-slate-300 hover:text-white rounded-xl transition-colors shrink-0"
-                >
-                  <span className="text-lg leading-none">📂</span>
-                </button>
-              </div>
+              <button
+                type="button"
+                onClick={handlePickContact}
+                className="w-full bg-blue-600/20 hover:bg-blue-600/30 border border-blue-500/50 text-blue-400 py-3 px-4 rounded-xl font-bold btn-press flex items-center justify-center gap-2.5 transition-colors shadow-sm"
+              >
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197m13.5-9a2.5 2.5 0 11-5 0 2.5 2.5 0 015 0z" />
+                </svg>
+                <span>إضافة من جهات الاتصال</span>
+              </button>
             )}
 
           <div>
             <label className="block text-sm text-slate-400 mb-2">اسم العميل</label>
             <input
+              ref={nameInputRef}
               type="text"
+              name="name"
+              id="customer-name"
+              autoComplete="name"
               value={formData.name}
               onChange={(e) => setFormData({ ...formData, name: e.target.value })}
               className={`w-full bg-slate-900 border border-slate-600 rounded-xl px-4 py-3 text-white placeholder-slate-500 ${themeFocus} focus:outline-none transition-colors`}
@@ -148,6 +143,9 @@ const CustomerModal = ({ isOpen, onClose, onSave, customer = null, managerId = n
             <label className="block text-sm text-slate-400 mb-2">رقم الهاتف</label>
             <input
               type="tel"
+              name="tel"
+              id="customer-tel"
+              autoComplete="tel"
               value={formData.phone}
               onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
               onBlur={(e) => {
@@ -199,12 +197,18 @@ const CustomerModal = ({ isOpen, onClose, onSave, customer = null, managerId = n
       </div>
     </div>
 
-    {/* نافذة استرداد جهات الاتصال الذكية للـ PWA */}
+    {/* نافذة استرداد جهات الاتصال للـ PWA */}
     <ContactPickerModal
       isOpen={showContactPicker}
       onClose={() => setShowContactPicker(false)}
       onSelectContact={handleContactSelected}
-      title="استرداد بيانات العميل من جهات الاتصال"
+      onFocusForm={() => {
+        setShowContactPicker(false);
+        setTimeout(() => {
+          nameInputRef.current?.focus();
+        }, 150);
+      }}
+      title="إضافة من جهات الاتصال"
     />
   </>
   );
