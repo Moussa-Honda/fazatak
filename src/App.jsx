@@ -33,10 +33,10 @@ function App() {
       console.error('Notification schedule init error:', error);
     });
 
-    // مزامنة ذكية فورية عند فتح التطبيق بحساب العميل
+    // فحص واسترجاع ذكي فوري عند فتح التطبيق بحساب العميل
     if (currentUser?.phone) {
-      cloudSyncService.syncWithCloud(currentUser.phone).catch((err) => {
-        console.warn('Startup cloud sync note:', err);
+      cloudSyncService.checkAndAutoRestoreOnLogin(currentUser.phone).catch((err) => {
+        console.warn('Startup auto-restore/sync note:', err);
       });
     }
   }, [isLicensed, currentUser]);

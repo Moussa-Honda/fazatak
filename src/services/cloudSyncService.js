@@ -1,6 +1,6 @@
 import { supabase, isSupabaseConfigured } from './supabase';
 import { exportData, importData } from './backupService';
-import { getDatabase } from './database';
+import { getDatabase, persistWebStore } from './database';
 import { DATA_CHANGED_EVENT, notifyDataChanged } from './dataEvents';
 import { authService } from './authService';
 
@@ -144,6 +144,18 @@ export const cloudSyncService = {
         }
       }
     }
+
+    // تأكيد حفظ الدمج في SQLite WebStore محلياً
+    await persistWebStore();
+
+    // تحديث كاش المستخدم المحلي في localStorage برقم هاتفه
+    const currentUserPhone = authService.getCurrentUser()?.phone;
+    if (currentUserPhone) {
+      try {
+        const fullPayload = await exportData();
+        localStorage.setItem(`fazatak_user_cache_${currentUserPhone}`, JSON.stringify(fullPayload));
+      } catch {}
+    }
   },
 
   /**
@@ -189,15 +201,41 @@ export const cloudSyncService = {
 
   /**
    * رفع وحفظ نسخة من بيانات ومعاملات العميل الحالية إلى السحابة
+   * مربوطة برقم هاتف العميل (ID المستخدم)
    */
   async backupUserToCloud(phone) {
-    if (!phone || !isSupabaseConfigured() || !supabase) {
-      return { success: false, reason: 'offline_or_unconfigured' };
+    if (!phone) {
+      return { success: false, reason: 'no_phone' };
     }
 
     try {
       const payload = await exportData();
       const recordsCount = Object.values(payload.counts || {}).reduce((acc, c) => acc + c, 0);
+
+      // 🛡️ حفظ فوري محلي في localStorage مرتبط برقم هاتف المستخدم (يدعم العمل بدون إنترنت)
+      try {
+        localStorage.setItem(`fazatak_user_cache_${phone}`, JSON.stringify(payload));
+      } catch (cacheErr) {
+        console.warn('[LocalCache] User cache write warning:', cacheErr);
+      }
+
+      if (!isSupabaseConfigured() || !supabase) {
+        return { success: true, localOnly: true, recordsCount };
+      }
+
+      // 🛡️ حماية كبرى: لا تسمح برفع قاعدة بيانات فارغة ومسح السحابة إذا كان لدى العميل بيانات سابقة بالسحابة
+      const existingCloud = await this.getCloudBackup(phone);
+      if (existingCloud && (existingCloud.records_count || 0) > 0 && recordsCount === 0) {
+        console.warn(`🛑 [CloudSync] القاعدة المحلية فارغة والسحابة تحتوي على ${existingCloud.records_count} سجل للرقم ${phone}. جاري استرجاع بيانات العميل وحمايتها من المسح!`);
+        isImportingCloud = true;
+        try {
+          await this.safeMergeCloudData(existingCloud.backup_payload);
+          notifyDataChanged({ scope: 'all', action: 'prevent-wipe-restore' });
+          return { success: true, restoredFromCloud: true, recordsCount: existingCloud.records_count };
+        } finally {
+          isImportingCloud = false;
+        }
+      }
 
       const record = {
         user_phone: phone,
@@ -255,32 +293,53 @@ export const cloudSyncService = {
 
   /**
    * مزامنة ذكية: دمج آمن بين السحابة والجهاز دون حذف أي بيانات
+   * مربوطة بهوية العميل (رقم الهاتف)
    */
   async syncWithCloud(phone) {
-    if (!phone || !isSupabaseConfigured() || !supabase || isImportingCloud) return;
+    if (!phone || isImportingCloud) return;
 
     try {
-      // 🛡️ فحص الأولوية الأولى: هل توجد أي عملية محلية معلقة (سداد قسط، إضافة عميل، إلخ)؟
+      const localPayload = await exportData();
+      const localCustomersCount = localPayload.tables?.customers?.length || 0;
+
+      const cloudRecord = await this.getCloudBackup(phone);
+      const cloudCustomersCount = cloudRecord?.backup_payload?.tables?.customers?.length || 0;
+
+      // 🛡️ حماية قصوى: إذا كان SQLite فارغاً لكن السحابة بها بيانات، استرجع فوراً دون أي تردد
+      if (localCustomersCount === 0 && cloudCustomersCount > 0) {
+        console.log(`[CloudSync] SQLite فارغة والسحابة تحتوي على بيانات (${cloudCustomersCount} عميل): جاري الاسترجاع الفوري...`);
+        isImportingCloud = true;
+        try {
+          await this.safeMergeCloudData(cloudRecord.backup_payload);
+          localStorage.setItem(LAST_SYNC_KEY, cloudRecord.updated_at);
+          localStorage.removeItem('fazatak_has_pending_cloud_sync');
+          notifySyncStatus('synced', {
+            lastSync: cloudRecord.updated_at,
+            recordsCount: cloudRecord.records_count
+          });
+          notifyDataChanged({ scope: 'all', action: 'cloud-auto-restore' });
+        } finally {
+          isImportingCloud = false;
+        }
+        return;
+      }
+
+      // فحص العمليات المعلقة بعد التأكد من أن المحلي ليس فارغاً في وجود سحابة ممتلئة
       const hasPendingSync = localStorage.getItem('fazatak_has_pending_cloud_sync') === 'true';
       const localLastMutation = Number(localStorage.getItem('fazatak_last_local_mutation') || 0);
       const localLastSync = Number(new Date(localStorage.getItem(LAST_SYNC_KEY) || 0).getTime());
 
       if (hasPendingSync || (localLastMutation > 0 && localLastMutation > localLastSync)) {
-        console.log('⚡ [CloudSync] اكتشاف عمليات محلية جديدة معلقة: جاري رفعها للسحابة فوراً لحمايتها...');
+        console.log('⚡ [CloudSync] اكتشاف عمليات محلية جديدة: رفع فوري للسحابة لحمايتها...');
         await this.backupUserToCloud(phone);
         return;
       }
 
-      const cloudRecord = await this.getCloudBackup(phone);
       if (!cloudRecord || !cloudRecord.updated_at) return;
 
-      const localPayload = await exportData();
-      const localCustomersCount = localPayload.tables?.customers?.length || 0;
-      const cloudCustomersCount = cloudRecord.backup_payload?.tables?.customers?.length || 0;
-
-      // أمان مطلق: إذا كان الجهاز المحلي به عملاء والسحابة فارغة، نقوم برفع المحلي فوراً لمنع مسح أي بيانات
+      // إذا كان المحلي به بيانات والسحابة فارغة
       if (localCustomersCount > 0 && cloudCustomersCount === 0) {
-        console.log('[CloudSync] Local has customers but cloud has none. Pushing local data to cloud...');
+        console.log('[CloudSync] المحلي به بيانات والسحابة فارغة: رفع البيانات للسحابة...');
         await this.backupUserToCloud(phone);
         return;
       }
@@ -288,9 +347,9 @@ export const cloudSyncService = {
       const cloudDate = new Date(cloudRecord.updated_at).getTime();
       const localDate = localLastSync;
 
-      // إذا كان تحديث السحابة أحدث من الجهاز الحالي
+      // إذا كانت السحابة أحدث
       if (cloudDate > localDate + 3000 && cloudRecord.backup_payload) {
-        console.log('[CloudSync] Newer data found in cloud. Safe-merging into local database...');
+        console.log('[CloudSync] السحابة أحدث: دمج آمن في قاعدة البيانات المحلية...');
         isImportingCloud = true;
         try {
           await this.safeMergeCloudData(cloudRecord.backup_payload);
@@ -341,55 +400,72 @@ export const cloudSyncService = {
   },
 
   /**
-   * عند تسجيل الدخول من أي جهاز: دمج ذكي بدون مسح البيانات المحلية
+   * عند تسجيل الدخول أو فتح التطبيق: فحص واسترجاع ذكي فوري برقم الهاتف
    */
   async checkAndAutoRestoreOnLogin(phone) {
     if (!phone) return { restored: false };
 
     try {
-      // 🛡️ فحص الأولوية الأولى: هل توجد أي عملية محلية معلقة (سداد قسط، إضافة عميل، إلخ)؟
-      const hasPendingSync = localStorage.getItem('fazatak_has_pending_cloud_sync') === 'true';
-      const localLastMutation = Number(localStorage.getItem('fazatak_last_local_mutation') || 0);
-      const localLastSync = Number(new Date(localStorage.getItem(LAST_SYNC_KEY) || 0).getTime());
-
-      if (hasPendingSync || (localLastMutation > 0 && localLastMutation > localLastSync)) {
-        console.log('⚡ [CloudSync] تسجيل الدخول: وجود عمليات محلية جديدة، جاري رفعها للسحابة فوراً لحمايتها...');
-        await this.backupUserToCloud(phone);
-        return { restored: false };
-      }
-
-      const cloudRecord = await this.getCloudBackup(phone);
-      if (!cloudRecord || !cloudRecord.backup_payload) {
-        return { restored: false };
-      }
-
       const localPayload = await exportData();
       const localCustomersCount = localPayload.tables?.customers?.length || 0;
-      const cloudCustomersCount = cloudRecord.backup_payload?.tables?.customers?.length || 0;
 
-      // أمان مطلق: إذا كان الجهاز المحلي به عملاء والسحابة فارغة، احفظ المحلي في السحابة فوراً
-      if (localCustomersCount > 0 && cloudCustomersCount === 0) {
-        console.log('[CloudSync] Login check: Local has customers, preserving and uploading to cloud...');
-        await this.backupUserToCloud(phone);
-        return { restored: false };
-      }
+      // 1. أولاً: فحص كاش المستخدم المحلي في localStorage برقم هاتفه
+      const cachedRaw = localStorage.getItem(`fazatak_user_cache_${phone}`);
+      let cached = null;
+      try { if (cachedRaw) cached = JSON.parse(cachedRaw); } catch {}
+      const cachedCustomersCount = cached?.tables?.customers?.length || 0;
 
-      if (cloudRecord.records_count > 0) {
-        console.log('[CloudSync] User logged in: safe-merging cloud transactions for:', phone);
+      // إذا كانت قاعدة SQLite فارغة لكن يوجد كاش محلي محفوظ لهذا الرقم، استرجع فوراً!
+      if (localCustomersCount === 0 && cachedCustomersCount > 0) {
+        console.log(`[AutoRestore] SQLite فارغة، جاري الاستعادة فوراً من الكاش المحلي للمستخدم: ${phone}`);
         isImportingCloud = true;
         try {
-          await this.safeMergeCloudData(cloudRecord.backup_payload);
-          localStorage.setItem(LAST_SYNC_KEY, cloudRecord.updated_at);
-          notifySyncStatus('synced', {
-            lastSync: cloudRecord.updated_at,
-            recordsCount: cloudRecord.records_count
-          });
-          notifyDataChanged({ scope: 'all', action: 'login-restore' });
-          return { restored: true, recordsCount: cloudRecord.records_count };
+          await this.safeMergeCloudData(cached);
+          notifyDataChanged({ scope: 'all', action: 'cache-restore' });
         } finally {
           isImportingCloud = false;
         }
       }
+
+      // 2. ثانياً: فحص السحابة Supabase لهذا الرقم
+      const cloudRecord = await this.getCloudBackup(phone);
+      if (cloudRecord && cloudRecord.backup_payload) {
+        const cloudCustomersCount = cloudRecord.backup_payload.tables?.customers?.length || 0;
+        
+        // إعادة فحص المحلي بعد احتمالية استرجاع الكاش
+        const currentPayload = await exportData();
+        const currentCustomersCount = currentPayload.tables?.customers?.length || 0;
+
+        if (currentCustomersCount === 0 && cloudCustomersCount > 0) {
+          console.log(`[AutoRestore] SQLite فارغة، جاري الاستعادة من سحابة Supabase للرقم: ${phone}`);
+          isImportingCloud = true;
+          try {
+            await this.safeMergeCloudData(cloudRecord.backup_payload);
+            localStorage.setItem(LAST_SYNC_KEY, cloudRecord.updated_at);
+            localStorage.removeItem('fazatak_has_pending_cloud_sync');
+            notifySyncStatus('synced', {
+              lastSync: cloudRecord.updated_at,
+              recordsCount: cloudRecord.records_count
+            });
+            notifyDataChanged({ scope: 'all', action: 'cloud-restore' });
+            return { restored: true, recordsCount: cloudRecord.records_count };
+          } finally {
+            isImportingCloud = false;
+          }
+        } else if (currentCustomersCount > 0 && cloudCustomersCount === 0) {
+          console.log(`[CloudSync] الجهاز به بيانات والسحابة فارغة: حفظ بالسحابة للرقم: ${phone}`);
+          await this.backupUserToCloud(phone);
+        } else if (currentCustomersCount > 0 && cloudCustomersCount > 0) {
+          await this.syncWithCloud(phone);
+        }
+      } else {
+        // لا يوجد سجل سحابي، إذا كان الجهاز به بيانات احفظها بالسحابة فوراً
+        const currentPayload = await exportData();
+        if ((currentPayload.tables?.customers?.length || 0) > 0) {
+          await this.backupUserToCloud(phone);
+        }
+      }
+
       return { restored: false };
     } catch (e) {
       console.warn('[CloudSync] Auto restore check bypassed:', e);

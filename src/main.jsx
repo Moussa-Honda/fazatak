@@ -37,7 +37,10 @@ const mountApp = async () => {
       if (!jeepEl && document.body) {
         jeepEl = document.createElement('jeep-sqlite')
         jeepEl.setAttribute('wasmPath', '/assets')
+        jeepEl.setAttribute('autoSave', 'true')
         document.body.appendChild(jeepEl)
+      } else if (jeepEl) {
+        jeepEl.setAttribute('autoSave', 'true')
       }
     }
     if (typeof customElements !== 'undefined') {

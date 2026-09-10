@@ -115,11 +115,38 @@ let initPromise = null;
 let isWebStore = false;
 
 export const persistWebStore = async () => {
-  if (isWebStore && sqlite) {
-    try {
-      await sqlite.saveToStore({ database: DB_NAME });
-    } catch (e) {
-      console.warn('saveToStore warning (non-fatal):', e);
+  if (isWebStore) {
+    let saved = false;
+    // 1. SQLiteConnection.saveToStore expects database name as string: sqlite.saveToStore(DB_NAME)
+    // which internally calls CapacitorSQLite.saveToStore({ database: DB_NAME })
+    if (sqlite && typeof sqlite.saveToStore === 'function') {
+      try {
+        await sqlite.saveToStore(DB_NAME);
+        saved = true;
+      } catch (e) {
+        console.warn('[DB] sqlite.saveToStore warning:', e);
+      }
+    }
+    // 2. Direct call to CapacitorSQLite plugin expects { database: DB_NAME }
+    if (!saved) {
+      try {
+        await CapacitorSQLite.saveToStore({ database: DB_NAME });
+        saved = true;
+      } catch (e2) {
+        console.warn('[DB] CapacitorSQLite.saveToStore warning:', e2);
+      }
+    }
+    // 3. Fallback: call jeep-sqlite DOM element directly if available
+    if (!saved && typeof document !== 'undefined') {
+      try {
+        const jeepEl = document.querySelector('jeep-sqlite');
+        if (jeepEl && typeof jeepEl.saveToStore === 'function') {
+          await jeepEl.saveToStore({ database: DB_NAME });
+          saved = true;
+        }
+      } catch (e3) {
+        console.warn('[DB] jeep-sqlite element saveToStore warning:', e3);
+      }
     }
   }
 };
@@ -143,6 +170,13 @@ if (typeof window !== 'undefined') {
 
   // دعم إضافي لـ iOS Safari PWA
   window.addEventListener('pagehide', flushOnExit);
+
+  // حفظ دوري احتياطي كل 10 ثواني لضمان ثبات البيانات
+  setInterval(() => {
+    if (isWebStore && db) {
+      persistWebStore().catch(() => {});
+    }
+  }, 10000);
 }
 
 
@@ -153,6 +187,8 @@ const wrapDbConnection = (rawDb) => {
   const originalRun = rawDb.run.bind(rawDb);
   const originalExecute = rawDb.execute.bind(rawDb);
   const originalExecuteSet = rawDb.executeSet ? rawDb.executeSet.bind(rawDb) : null;
+  const originalCommit = rawDb.commitTransaction ? rawDb.commitTransaction.bind(rawDb) : null;
+  const originalClose = rawDb.close ? rawDb.close.bind(rawDb) : null;
 
   rawDb.run = async (...args) => {
     const res = await originalRun(...args);
@@ -171,6 +207,21 @@ const wrapDbConnection = (rawDb) => {
       const res = await originalExecuteSet(...args);
       await persistWebStore();
       return res;
+    };
+  }
+
+  if (originalCommit) {
+    rawDb.commitTransaction = async (...args) => {
+      const res = await originalCommit(...args);
+      await persistWebStore();
+      return res;
+    };
+  }
+
+  if (originalClose) {
+    rawDb.close = async (...args) => {
+      await persistWebStore();
+      return await originalClose(...args);
     };
   }
 
@@ -199,7 +250,10 @@ export const initDatabase = async () => {
         if (!jeepEl && document.body) {
           jeepEl = document.createElement('jeep-sqlite');
           jeepEl.setAttribute('wasmPath', '/assets');
+          jeepEl.setAttribute('autoSave', 'true');
           document.body.appendChild(jeepEl);
+        } else if (jeepEl) {
+          jeepEl.setAttribute('autoSave', 'true');
         }
       }
       if (typeof customElements !== 'undefined') {
@@ -217,7 +271,7 @@ export const initDatabase = async () => {
         db = await sqlite.retrieveConnection(DB_NAME, false);
         console.log('Retrieved existing connection');
       } else {
-        db = await sqlite.createConnection(DB_NAME, false, 'secret', 1, false);
+        db = await sqlite.createConnection(DB_NAME, false, 'no-encryption', 1, false);
         console.log('Created new connection');
       }
     } catch (err) {
@@ -226,7 +280,7 @@ export const initDatabase = async () => {
       try {
         db = await sqlite.retrieveConnection(DB_NAME, false);
       } catch {
-        db = await sqlite.createConnection(DB_NAME, false, 'secret', 1, false);
+        db = await sqlite.createConnection(DB_NAME, false, 'no-encryption', 1, false);
       }
     }
     
