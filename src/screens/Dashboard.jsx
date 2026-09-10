@@ -13,6 +13,8 @@ import { generatePDFStatement } from '../utils/pdfGenerator';
 import { contractService, customerService, installmentService, settingsService } from '../services/database';
 import { notificationService } from '../services/notificationService';
 import { formatForWhatsApp } from '../utils/phoneUtils';
+import { notifyPageNavigated } from '../services/dataEvents';
+import { cloudSyncService } from '../services/cloudSyncService';
 
 const SUPPORT_PHONE_DISPLAY = '+966556854162';
 const SUPPORT_WHATSAPP_PHONE = '966556854162';
@@ -98,31 +100,27 @@ const HomeAlertsPanel = ({ alerts, loading, onSelectAlert }) => {
   return (
     <div className="bg-slate-800/50 border border-slate-700/60 rounded-2xl p-4">
       <div className="flex items-center justify-between mb-3">
-        <div>
-          <h3 className="text-sm font-bold text-white">تنبيهات الأقساط</h3>
-          <p className="text-xs text-slate-400 mt-0.5">تظهر بدون عملاء قسم المتعثرين</p>
-        </div>
-        <div className="text-left">
-          <p className="text-xl font-black text-white">{total}</p>
-          <p className="text-[10px] text-slate-500">تنبيه</p>
-        </div>
+        <h3 className="text-sm font-bold text-white flex items-center gap-2">
+          <span>🔔</span>
+          تنبيهات الأقساط والمتابعة
+        </h3>
+        <span className="text-xs text-slate-400">إجمالي {total} أقساط</span>
       </div>
 
       <div className="grid grid-cols-3 gap-2">
-        {cards.map(card => (
+        {cards.map((card) => (
           <button
             key={card.key}
             type="button"
             onClick={card.onClick}
-            disabled={card.count === 0}
-            className={`rounded-xl border p-3 text-right transition-transform active:scale-95 disabled:opacity-45 disabled:active:scale-100 ${card.color}`}
+            className={`border rounded-xl p-3 text-right transition-all active:scale-[0.98] ${card.color}`}
           >
-            <div className="flex items-center justify-between mb-2">
-              <span className={`w-2.5 h-2.5 rounded-full ${card.dot}`} />
-              <span className="text-xl font-black">{card.count}</span>
+            <div className="flex items-center justify-between gap-1 mb-1.5">
+              <span className="text-xs font-bold truncate">{card.title}</span>
+              <span className={`w-2 h-2 rounded-full shrink-0 ${card.dot}`} />
             </div>
-            <p className="text-xs font-bold text-white">{card.title}</p>
-            <p className="text-[10px] opacity-75 mt-1 leading-4">{card.detail}</p>
+            <p className="text-xl font-black leading-none">{card.count}</p>
+            <p className="text-[10px] opacity-80 mt-1 truncate">{card.detail}</p>
           </button>
         ))}
       </div>
@@ -130,24 +128,25 @@ const HomeAlertsPanel = ({ alerts, loading, onSelectAlert }) => {
   );
 };
 
-const AlertDetailsModal = ({ type, items, onClose, onOpenCustomer, onSendWhatsApp }) => {
-  const meta = ALERT_META[type] || ALERT_META.today;
+const HomeAlertsModal = ({ isOpen, onClose, alertType, homeAlerts, onOpenCustomer, onSendWhatsApp }) => {
+  if (!isOpen || !alertType) return null;
+
+  const meta = ALERT_META[alertType] || ALERT_META.today;
+  const items = homeAlerts?.[alertType] || [];
 
   return (
-    <div className="fixed inset-0 z-[9990] flex items-end sm:items-center justify-center modal-safe-area">
-      <div className="absolute inset-0 bg-black/75 backdrop-blur-sm" onClick={onClose} />
-      <div className="relative w-full max-w-lg max-h-[86vh] bg-slate-900 border border-slate-700 shadow-2xl rounded-t-2xl sm:rounded-2xl overflow-hidden">
-        <div className="p-4 border-b border-slate-700 flex items-center justify-between gap-3">
+    <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 p-4" dir="rtl">
+      <div className="bg-slate-900 border border-slate-700 rounded-3xl w-full max-w-lg overflow-hidden shadow-2xl animate-fade-in flex flex-col max-h-[85vh]">
+        <div className="p-4 bg-slate-800/80 border-b border-slate-700 flex items-center justify-between shrink-0">
           <div>
-            <h3 className="text-white text-lg font-bold">{meta.title}</h3>
-            <p className="text-slate-400 text-xs mt-1">{items.length} تنبيه</p>
+            <h3 className="text-base font-bold text-white">{meta.title}</h3>
+            <p className="text-xs text-slate-400 mt-0.5">عدد الأقساط: {items.length}</p>
           </div>
           <button
-            type="button"
             onClick={onClose}
-            className="w-10 h-10 rounded-xl bg-slate-800 text-slate-300 hover:bg-slate-700 transition-colors"
+            className="w-8 h-8 rounded-full bg-slate-700/70 hover:bg-slate-700 text-slate-300 hover:text-white flex items-center justify-center text-sm font-bold"
           >
-            X
+            ✕
           </button>
         </div>
 
@@ -205,7 +204,7 @@ const AlertDetailsModal = ({ type, items, onClose, onOpenCustomer, onSendWhatsAp
 
 const Dashboard = ({ isExpired, expiry, onReActivate, currentUser, onLogout }) => {
   const greeting = useGreeting();
-  const { stats } = useManagerStats();
+  const { stats, refresh: refreshStats } = useManagerStats();
   const [activeTab, setActiveTab] = useState('dashboard');
   const [selectedCustomer, setSelectedCustomer] = useState(null);
   const [selectedCustody, setSelectedCustody] = useState(null);
@@ -261,12 +260,29 @@ const Dashboard = ({ isExpired, expiry, onReActivate, currentUser, onLogout }) =
     }
   }, [activeTab, loadHomeAlerts]);
 
+  // تحديث تلقائي وفوري للبيانات والإحصائيات كلما تنقل المستخدم بين التبويبات أو الصفحات
+  useEffect(() => {
+    notifyPageNavigated({
+      activeTab,
+      customerId: selectedCustomer?.id,
+      managerId: selectedManager?.id,
+      custodyId: selectedCustody?.id
+    });
+    refreshStats?.();
+    loadHomeAlerts();
+
+    if (currentUser?.phone) {
+      cloudSyncService.syncWithCloud(currentUser.phone).catch(() => {});
+    }
+  }, [activeTab, selectedCustomer, selectedManager, selectedCustody, refreshStats, loadHomeAlerts, currentUser?.phone]);
+
   const getRemainingDays = () => {
+    if (isExpired) return 'منتهي (عرض فقط)';
     if (!expiry) return null;
     if (expiry > 2100000000) return 'تفعيل دائم';
     const now = Math.floor(Date.now() / 1000);
     const diff = expiry - now;
-    if (diff <= 0) return 'منتهي';
+    if (diff <= 0) return 'منتهي (عرض فقط)';
     const days = Math.ceil(diff / (24 * 60 * 60));
     return `باقي ${days} يوم`;
   };
@@ -478,6 +494,7 @@ const Dashboard = ({ isExpired, expiry, onReActivate, currentUser, onLogout }) =
               <div className="flex items-center gap-2">
                 <button
                   onClick={async () => {
+                    if (isExpired) return setShowRenewal(true);
                     const newValue = !selectedCustomer.is_manually_flagged_as_overdue;
                     await customerService.update(selectedCustomer.id, { is_manually_flagged_as_overdue: newValue });
                     notificationService.refreshSchedule().catch(error => console.error('Notification refresh error:', error));
@@ -530,6 +547,8 @@ const Dashboard = ({ isExpired, expiry, onReActivate, currentUser, onLogout }) =
             key="managers-list"
             onSelectManager={setSelectedManager} 
             onBack={() => setActiveTab('dashboard')} 
+            isReadOnly={isExpired}
+            onRenewalRequest={() => setShowRenewal(true)}
           />
         );
 
@@ -549,6 +568,7 @@ const Dashboard = ({ isExpired, expiry, onReActivate, currentUser, onLogout }) =
               <div className="flex items-center gap-2">
                 <button
                   onClick={async () => {
+                    if (isExpired) return setShowRenewal(true);
                     const newValue = !selectedCustomer.is_manually_flagged_as_overdue;
                     await customerService.update(selectedCustomer.id, { is_manually_flagged_as_overdue: newValue });
                     notificationService.refreshSchedule().catch(error => console.error('Notification refresh error:', error));
@@ -565,13 +585,19 @@ const Dashboard = ({ isExpired, expiry, onReActivate, currentUser, onLogout }) =
               </div>
             </div>
             <div className="flex-1 overflow-y-auto custom-scrollbar p-4">
-              <ContractList customerId={selectedCustomer.id} isReadOnly={isExpired} themeColor="red" />
+              <ContractList 
+                customerId={selectedCustomer.id} 
+                isReadOnly={isExpired} 
+                onRenewalRequest={() => setShowRenewal(true)} 
+                themeColor="red" 
+              />
             </div>
           </div>
         ) : selectedManager ? (
           <CustomerList 
             onSelect={setSelectedCustomer} 
             isReadOnly={isExpired} 
+            onRenewalRequest={() => setShowRenewal(true)} 
             managerId={selectedManager.id}
             managerName={selectedManager.name}
             filterType="overdue"
@@ -583,6 +609,8 @@ const Dashboard = ({ isExpired, expiry, onReActivate, currentUser, onLogout }) =
             onSelectManager={setSelectedManager} 
             filterType="overdue"
             onBack={() => setActiveTab('dashboard')} 
+            isReadOnly={isExpired}
+            onRenewalRequest={() => setShowRenewal(true)}
           />
         );
 
@@ -593,6 +621,7 @@ const Dashboard = ({ isExpired, expiry, onReActivate, currentUser, onLogout }) =
             custody={selectedCustody} 
             onBack={() => setSelectedCustody(null)} 
             isReadOnly={isExpired}
+            onRenewalRequest={() => setShowRenewal(true)}
           />
         ) : (
           <CustodyList onSelectCustody={setSelectedCustody} isReadOnly={isExpired} onRenewalRequest={() => setShowRenewal(true)} />
@@ -618,6 +647,37 @@ const Dashboard = ({ isExpired, expiry, onReActivate, currentUser, onLogout }) =
 
   return (
     <div className="flex flex-col h-full max-h-full flex-1 min-h-0 w-full bg-slate-900 overflow-hidden relative">
+      {/* ── Persistent Read-Only / View-Only Warning Banner ── */}
+      {isExpired && (
+        <div className="bg-gradient-to-r from-amber-600/30 via-rose-600/25 to-amber-600/30 border-b border-amber-500/40 px-3 py-2 shrink-0 flex items-center justify-between gap-2 z-40 backdrop-blur-md shadow-md">
+          <div className="flex items-center gap-2 min-w-0">
+            <span className="text-amber-400 text-base shrink-0 animate-pulse">🔒</span>
+            <div className="min-w-0">
+              <p className="text-amber-200 text-xs font-bold truncate">
+                وضع العرض والمشاهدة فقط (انتهت فترة التجربة / الاشتراك)
+              </p>
+              <p className="text-amber-300/80 text-[10px] truncate hidden sm:block">
+                يمكنك الاطلاع على كافة الحسابات والتقارير ولكن لا يمكن إنشاء أو تسجيل معاملات جديدة
+              </p>
+            </div>
+          </div>
+          <div className="flex items-center gap-1.5 shrink-0">
+            <button
+              onClick={() => setShowRenewal(true)}
+              className="px-3 py-1 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 rounded-lg font-black text-xs shadow-md transition-all active:scale-95 cursor-pointer"
+            >
+              تجديد الآن
+            </button>
+            <button
+              onClick={handleSupportWhatsApp}
+              className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg font-bold text-xs shadow transition-all active:scale-95 cursor-pointer"
+            >
+              واتساب
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* ── Page content ── */}
       <div className="flex-1 min-h-0 overflow-hidden relative">
         {renderContent()}

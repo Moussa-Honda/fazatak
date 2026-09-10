@@ -41,6 +41,7 @@ const CustodyList = ({ onSelectCustody, isReadOnly, onRenewalRequest }) => {
 
   const handleDelete = async (e, id) => {
     e.stopPropagation();
+    if (isReadOnly) return onRenewalRequest?.();
     if (window.confirm('هل أنت متأكد من حذف هذه العهدة؟')) {
       await portfolioService.delete(id);
       loadCustodies();
@@ -107,6 +108,7 @@ const CustodyList = ({ onSelectCustody, isReadOnly, onRenewalRequest }) => {
                     <button
                       onClick={(e) => {
                         e.stopPropagation();
+                        if (isReadOnly) return onRenewalRequest?.();
                         setEditingCustody(item);
                         setShowModal(true);
                       }}

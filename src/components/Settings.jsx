@@ -32,7 +32,7 @@ const ToggleItem = ({ title, description, value, onToggle, icon }) => (
   </div>
 );
 
-const Settings = ({ onSettingsChange, onLicenseRenewed, currentUser, onLogout }) => {
+const Settings = ({ onSettingsChange, onLicenseRenewed, currentUser, onLogout, isReadOnly = false, onRenewalRequest }) => {
   const [driveLoading, setDriveLoading] = useState('');
   const [driveMessage, setDriveMessage] = useState('');
   const [driveError, setDriveError] = useState('');
@@ -56,6 +56,7 @@ const Settings = ({ onSettingsChange, onLicenseRenewed, currentUser, onLogout })
   };
 
   const handleDriveRestoreClick = async () => {
+    if (isReadOnly) return onRenewalRequest?.();
     setDriveLoading('list');
     setDriveMessage('');
     setDriveError('');
@@ -367,11 +368,19 @@ const Settings = ({ onSettingsChange, onLicenseRenewed, currentUser, onLogout })
             )}
           </div>
 
-          <div className="bg-slate-950/60 rounded-xl p-3 border border-slate-800 space-y-2 mb-0 text-xs">
+          <div className="bg-slate-950/60 rounded-xl p-3 border border-slate-800 space-y-2.5 mb-0 text-xs">
             <div className="flex justify-between items-center">
               <span className="text-slate-400">حالة الاشتراك السحابي:</span>
-              <span className="px-2.5 py-0.5 rounded-full font-bold text-[11px] bg-emerald-500/20 text-emerald-400 border border-emerald-500/40">
-                {currentUser.subscription_status === 'trial' ? 'فترة تجريبية سارية' : 'اشتراك نشط'}
+              <span className={`px-2.5 py-0.5 rounded-full font-bold text-[11px] border ${
+                isReadOnly 
+                  ? 'bg-rose-500/20 text-rose-400 border-rose-500/40' 
+                  : 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/40'
+              }`}>
+                {isReadOnly 
+                  ? 'منتهي (وضع العرض فقط)' 
+                  : currentUser.subscription_status === 'trial' 
+                    ? 'فترة تجريبية سارية (35 يوماً)' 
+                    : 'اشتراك نشط'}
               </span>
             </div>
             {currentUser.subscription_expiry && (
@@ -380,6 +389,28 @@ const Settings = ({ onSettingsChange, onLicenseRenewed, currentUser, onLogout })
                 <span className="text-slate-200 font-mono font-medium">
                   {new Date(currentUser.subscription_expiry).toLocaleDateString('ar-EG')}
                 </span>
+              </div>
+            )}
+            {isReadOnly && (
+              <div className="pt-2 border-t border-slate-800/80 flex gap-2">
+                <button
+                  type="button"
+                  onClick={onRenewalRequest}
+                  className="flex-1 py-2.5 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 rounded-xl font-bold text-xs shadow-md transition-all active:scale-95 cursor-pointer"
+                >
+                  ⚡ تجديد الاشتراك الآن
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const message = `السلام عليكم، أريد تجديد اشتراك تطبيق فزعتك لرقم الحساب: ${currentUser?.phone || ''}`;
+                    window.open(`https://wa.me/${SUPPORT_WHATSAPP_PHONE}?text=${encodeURIComponent(message)}`, '_blank');
+                  }}
+                  className="px-3.5 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl font-bold text-xs shadow transition-all active:scale-95 cursor-pointer flex items-center gap-1"
+                >
+                  <span>💬</span>
+                  <span>واتساب</span>
+                </button>
               </div>
             )}
           </div>

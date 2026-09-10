@@ -3,14 +3,14 @@ import { managerService } from '../services/database';
 import ManagerModal from './ManagerModal';
 import { useLiveRefresh } from '../hooks/useLiveRefresh';
 
-const ManagerList = ({ onSelectManager, onBack, filterType = 'all' }) => {
+const ManagerList = ({ onSelectManager, onBack, filterType = 'all', isReadOnly = false, onRenewalRequest }) => {
   const [managers, setManagers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
 
   useEffect(() => {
     loadManagers();
-  }, []);
+  }, [filterType]);
 
   const loadManagers = async () => {
     setLoading(true);
@@ -33,6 +33,7 @@ const ManagerList = ({ onSelectManager, onBack, filterType = 'all' }) => {
 
   const handleDelete = async (manager, e) => {
     e.stopPropagation();
+    if (isReadOnly) return onRenewalRequest?.();
     if (window.confirm(`هل أنت متأكد من حذف "${manager.name}"؟\nسيتم فك ارتباط العملاء التابعين له لكن لن يتم حذفهم.`)) {
       await managerService.delete(manager.id);
       loadManagers();
@@ -64,8 +65,11 @@ const ManagerList = ({ onSelectManager, onBack, filterType = 'all' }) => {
           </p>
         </div>
         <button
-          onClick={() => setShowModal(true)}
-          className="w-10 h-10 bg-indigo-600 text-white rounded-xl flex items-center justify-center shadow-lg shadow-indigo-600/20 active:scale-95 transition-all"
+          onClick={() => {
+            if (isReadOnly) return onRenewalRequest?.();
+            setShowModal(true);
+          }}
+          className="w-10 h-10 bg-indigo-600 text-white rounded-xl flex items-center justify-center shadow-lg shadow-indigo-600/20 active:scale-95 transition-all cursor-pointer"
         >
           <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />

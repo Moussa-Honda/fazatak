@@ -58,11 +58,8 @@ const AuthGate = ({ onAuthenticated, isExpired = false, initialUser = null }) =>
         console.warn('Login cloud sync error:', syncErr);
       }
 
-      if (user.subscription_status === 'expired') {
-        setMode('expired');
-      } else {
-        onAuthenticated(user);
-      }
+      // الدخول مباشرة للتطبيق حتى وإن كانت التجربة أو الاشتراك منتهياً (وضع العرض فقط)
+      onAuthenticated(user);
     } catch (err) {
       setError(err.message || 'فشل تسجيل الدخول، تأكد من صحة البيانات');
     } finally {
@@ -580,8 +577,20 @@ const AuthGate = ({ onAuthenticated, isExpired = false, initialUser = null }) =>
                 </div>
               </div>
 
-              <div className="pt-2">
+              <div className="pt-2 flex flex-col gap-2.5">
                 <button
+                  type="button"
+                  onClick={() => {
+                    const usr = authService.getCurrentUser() || initialUser;
+                    if (usr) onAuthenticated(usr);
+                  }}
+                  className="w-full py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer"
+                >
+                  <span>👁️</span>
+                  <span>تصفح الحساب والمعاملات (عرض فقط)</span>
+                </button>
+                <button
+                  type="button"
                   onClick={() => { authService.logout(); setMode('login'); }}
                   className="text-xs text-slate-500 hover:text-slate-300 underline"
                 >

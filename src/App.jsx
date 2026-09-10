@@ -66,16 +66,10 @@ function App() {
         const expiryMs = new Date(user.subscription_expiry).getTime();
         const hasExpired = expiryMs < Date.now() || user.subscription_status === 'expired';
 
-        if (hasExpired) {
-          setIsLicensed(false);
-          setIsExpired(true);
-          setExpiry(Math.floor(expiryMs / 1000));
-        } else {
-          setIsLicensed(true);
-          setIsExpired(false);
-          setExpiry(Math.floor(expiryMs / 1000));
-          setDecryptionKey('FAZATAK_SECURE_KEY');
-        }
+        setIsLicensed(true);
+        setIsExpired(hasExpired);
+        setExpiry(Math.floor(expiryMs / 1000));
+        setDecryptionKey('FAZATAK_SECURE_KEY');
 
         // فحص واسترجاع ذكي فوري إذا كانت المعاملات غير موجودة محلياً قبل فتح الواجهة
         try {
@@ -90,10 +84,8 @@ function App() {
             setCurrentUser(updated);
             const updatedExpMs = new Date(updated.subscription_expiry).getTime();
             setExpiry(Math.floor(updatedExpMs / 1000));
-            if (updatedExpMs < Date.now() || updated.subscription_status === 'expired') {
-              setIsLicensed(false);
-              setIsExpired(true);
-            }
+            const stillExpired = updatedExpMs < Date.now() || updated.subscription_status === 'expired';
+            setIsExpired(stillExpired);
           }
         }).catch(() => {});
 
@@ -119,9 +111,10 @@ function App() {
   const handleAuthenticated = async (user) => {
     setCurrentUser(user);
     const expiryMs = new Date(user.subscription_expiry).getTime();
+    const hasExpired = expiryMs < Date.now() || user.subscription_status === 'expired';
     setExpiry(Math.floor(expiryMs / 1000));
     setIsLicensed(true);
-    setIsExpired(false);
+    setIsExpired(hasExpired);
     setDecryptionKey('FAZATAK_SECURE_KEY');
   };
 

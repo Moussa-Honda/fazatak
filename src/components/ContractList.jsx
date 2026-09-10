@@ -585,6 +585,7 @@ const ContractList = ({ customerId, isReadOnly, onRenewalRequest, themeColor = '
                     <button
                       onClick={(e) => {
                         e.stopPropagation();
+                        if (isReadOnly) return onRenewalRequest?.();
                         if (window.confirm(`⚠️ هل أنت متأكد من حذف عقد "${contract.title}"؟\n\nسيتم حذف العقد وجميع أقساطه نهائياً!`)) {
                           contractService.delete(contract.id).then(() => {
                             notificationService.refreshSchedule().catch(error => console.error('Notification refresh error:', error));

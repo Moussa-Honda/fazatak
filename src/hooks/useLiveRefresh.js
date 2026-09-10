@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react';
-import { DATA_CHANGED_EVENT } from '../services/dataEvents';
+import { DATA_CHANGED_EVENT, PAGE_NAVIGATED_EVENT } from '../services/dataEvents';
 
 export const useLiveRefresh = (refresh, enabled = true) => {
   const refreshRef = useRef(refresh);
@@ -40,7 +40,7 @@ export const useLiveRefresh = (refresh, enabled = true) => {
 
     const scheduleRefresh = () => {
       if (timerId) window.clearTimeout(timerId);
-      timerId = window.setTimeout(runRefresh, 200);
+      timerId = window.setTimeout(runRefresh, 50);
     };
 
     const handleVisibilityChange = () => {
@@ -50,6 +50,7 @@ export const useLiveRefresh = (refresh, enabled = true) => {
     };
 
     window.addEventListener(DATA_CHANGED_EVENT, scheduleRefresh);
+    window.addEventListener(PAGE_NAVIGATED_EVENT, scheduleRefresh);
     window.addEventListener('focus', scheduleRefresh);
     window.addEventListener('pageshow', scheduleRefresh);
 
@@ -62,6 +63,7 @@ export const useLiveRefresh = (refresh, enabled = true) => {
       disposed = true;
       if (timerId) window.clearTimeout(timerId);
       window.removeEventListener(DATA_CHANGED_EVENT, scheduleRefresh);
+      window.removeEventListener(PAGE_NAVIGATED_EVENT, scheduleRefresh);
       window.removeEventListener('focus', scheduleRefresh);
       window.removeEventListener('pageshow', scheduleRefresh);
 

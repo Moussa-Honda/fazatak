@@ -57,6 +57,15 @@ export const authService = {
   },
 
   /**
+   * التحقق مما إذا كان اشتراك المستخدم أو فترته التجريبية منتهية الصلاحية
+   */
+  isSubscriptionExpired() {
+    const user = this.getCurrentUser();
+    if (!user || !user.subscription_expiry) return false;
+    return new Date(user.subscription_expiry).getTime() < Date.now() || user.subscription_status === 'expired';
+  },
+
+  /**
    * تخزين جلسة المستخدم محلياً
    */
   setCurrentUser(user) {
@@ -122,8 +131,8 @@ export const authService = {
     const passwordHash = await hashSecureValue(cleanPass, cleanPhone);
     const pinHash = await hashSecureValue(cleanPin, cleanPhone);
 
-    // منح فترة تجريبية مجانية لمدة 14 يوماً تلقائياً
-    const trialDays = 14;
+    // منح فترة تجريبية مجانية لمدة 35 يوماً تلقائياً
+    const trialDays = 35;
     const expiryDate = new Date();
     expiryDate.setDate(expiryDate.getDate() + trialDays);
 

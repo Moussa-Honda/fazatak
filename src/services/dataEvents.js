@@ -1,4 +1,5 @@
 export const DATA_CHANGED_EVENT = 'fazatak:data-changed';
+export const PAGE_NAVIGATED_EVENT = 'fazatak:page-navigated';
 
 export const notifyDataChanged = (detail = {}) => {
   if (typeof window === 'undefined') return;
@@ -14,6 +15,17 @@ export const notifyDataChanged = (detail = {}) => {
     detail: {
       ...detail,
       changedAt: Date.now()
+    }
+  }));
+};
+
+export const notifyPageNavigated = (detail = {}) => {
+  if (typeof window === 'undefined') return;
+
+  window.dispatchEvent(new CustomEvent(PAGE_NAVIGATED_EVENT, {
+    detail: {
+      ...detail,
+      navigatedAt: Date.now()
     }
   }));
 };

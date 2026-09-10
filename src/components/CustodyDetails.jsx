@@ -5,7 +5,7 @@ import { generatePDF, PDF_MODES } from '../utils/pdfGenerator';
 import CustodyExpenseModal from './CustodyExpenseModal';
 import { useLiveRefresh } from '../hooks/useLiveRefresh';
 
-const CustodyDetails = ({ custody, onBack }) => {
+const CustodyDetails = ({ custody, onBack, isReadOnly = false, onRenewalRequest }) => {
   const [expenses, setExpenses] = useState([]);
   const [loading, setLoading] = useState(true);
   const [spent, setSpent] = useState(0);
@@ -40,6 +40,7 @@ const CustodyDetails = ({ custody, onBack }) => {
   useLiveRefresh(loadData, Boolean(custody?.id));
 
   const handleDeleteExpense = async (id) => {
+    if (isReadOnly) return onRenewalRequest?.();
     if (window.confirm('هل أنت متأكد من حذف هذا المصروف؟')) {
       await portfolioExpenseService.delete(id);
       loadData();
@@ -184,8 +185,11 @@ const CustodyDetails = ({ custody, onBack }) => {
       {/* FAB Add Expense */}
       <div className="fixed bottom-24 left-6 z-50">
         <button
-          onClick={() => setShowExpenseModal(true)}
-          className="bg-blue-600 hover:bg-blue-700 text-white w-14 h-14 rounded-2xl shadow-lg shadow-blue-600/30 flex items-center justify-center btn-press"
+          onClick={() => {
+            if (isReadOnly) return onRenewalRequest?.();
+            setShowExpenseModal(true);
+          }}
+          className="bg-blue-600 hover:bg-blue-700 text-white w-14 h-14 rounded-2xl shadow-lg shadow-blue-600/30 flex items-center justify-center btn-press cursor-pointer"
         >
           <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 6v6m0 0v6m0-6h6m-6 0H6" />

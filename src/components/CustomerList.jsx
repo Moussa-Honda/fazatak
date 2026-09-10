@@ -71,7 +71,9 @@ const CustomerList = ({
 
   useEffect(() => {
     loadCustomers();
-  }, []);
+  }, [managerId, filterType]);
+
+  useLiveRefresh(loadCustomers);
 
   useEffect(() => {
     filterCustomers();
