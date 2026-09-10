@@ -3,7 +3,7 @@
 // استراتيجية: Cache First للـ assets + Offline fallback للـ navigation
 // ============================================================
 
-const CACHE_VERSION = 'v2.2.4';
+const CACHE_VERSION = 'v2.2.5';
 const CACHE_NAME = `fazatak-cache-${CACHE_VERSION}`;
 const OFFLINE_PAGE = '/index.html';
 

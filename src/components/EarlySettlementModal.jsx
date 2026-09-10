@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { contractService } from '../services/database';
 import { notificationService } from '../services/notificationService';
 
@@ -9,11 +9,13 @@ const EarlySettlementModal = ({ isOpen, onClose, onSave, contract, themeColor = 
   const [discountAmount, setDiscountAmount] = useState('');
   const [remainingBalance, setRemainingBalance] = useState(0);
   const [loading, setLoading] = useState(false);
+  const isSubmittingRef = useRef(false);
 
   useEffect(() => {
     if (isOpen && contract) {
       loadRemainingBalance();
       setDiscountAmount('');
+      isSubmittingRef.current = false;
     }
   }, [isOpen, contract]);
 
@@ -24,6 +26,7 @@ const EarlySettlementModal = ({ isOpen, onClose, onSave, contract, themeColor = 
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    if (loading || isSubmittingRef.current) return;
     
     const discount = parseFloat(discountAmount) || 0;
     const finalAmount = remainingBalance - discount;
@@ -43,6 +46,7 @@ const EarlySettlementModal = ({ isOpen, onClose, onSave, contract, themeColor = 
 
     if (!confirmed) return;
 
+    isSubmittingRef.current = true;
     setLoading(true);
     let settlementSuccess = false;
     
@@ -62,9 +66,10 @@ const EarlySettlementModal = ({ isOpen, onClose, onSave, contract, themeColor = 
       console.error('Early settlement error:', error);
       // Only show error if settlement actually failed
       if (!settlementSuccess) {
-        alert('حدث خطأ أثناء تطبيق السداد المبكر');
+        alert(error?.message ? `حدث خطأ أثناء تطبيق السداد المبكر: ${error.message}` : 'حدث خطأ أثناء تطبيق السداد المبكر');
       }
     } finally {
+      isSubmittingRef.current = false;
       setLoading(false);
     }
   };

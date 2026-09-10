@@ -114,40 +114,55 @@ let db = null;
 let initPromise = null;
 let isWebStore = false;
 
+let isSaving = false;
+let saveQueued = false;
+
 export const persistWebStore = async () => {
-  if (isWebStore) {
-    let saved = false;
-    // 1. SQLiteConnection.saveToStore expects database name as string: sqlite.saveToStore(DB_NAME)
-    // which internally calls CapacitorSQLite.saveToStore({ database: DB_NAME })
-    if (sqlite && typeof sqlite.saveToStore === 'function') {
-      try {
-        await sqlite.saveToStore(DB_NAME);
-        saved = true;
-      } catch (e) {
-        console.warn('[DB] sqlite.saveToStore warning:', e);
-      }
-    }
-    // 2. Direct call to CapacitorSQLite plugin expects { database: DB_NAME }
-    if (!saved) {
-      try {
-        await CapacitorSQLite.saveToStore({ database: DB_NAME });
-        saved = true;
-      } catch (e2) {
-        console.warn('[DB] CapacitorSQLite.saveToStore warning:', e2);
-      }
-    }
-    // 3. Fallback: call jeep-sqlite DOM element directly if available
-    if (!saved && typeof document !== 'undefined') {
-      try {
-        const jeepEl = document.querySelector('jeep-sqlite');
-        if (jeepEl && typeof jeepEl.saveToStore === 'function') {
-          await jeepEl.saveToStore({ database: DB_NAME });
+  if (!isWebStore) return;
+  if (isSaving) {
+    saveQueued = true;
+    return;
+  }
+
+  isSaving = true;
+  try {
+    do {
+      saveQueued = false;
+      let saved = false;
+      // 1. SQLiteConnection.saveToStore expects database name as string: sqlite.saveToStore(DB_NAME)
+      // which internally calls CapacitorSQLite.saveToStore({ database: DB_NAME })
+      if (sqlite && typeof sqlite.saveToStore === 'function') {
+        try {
+          await sqlite.saveToStore(DB_NAME);
           saved = true;
+        } catch (e) {
+          console.warn('[DB] sqlite.saveToStore warning:', e);
         }
-      } catch (e3) {
-        console.warn('[DB] jeep-sqlite element saveToStore warning:', e3);
       }
-    }
+      // 2. Direct call to CapacitorSQLite plugin expects { database: DB_NAME }
+      if (!saved) {
+        try {
+          await CapacitorSQLite.saveToStore({ database: DB_NAME });
+          saved = true;
+        } catch (e2) {
+          console.warn('[DB] CapacitorSQLite.saveToStore warning:', e2);
+        }
+      }
+      // 3. Fallback: call jeep-sqlite DOM element directly if available
+      if (!saved && typeof document !== 'undefined') {
+        try {
+          const jeepEl = document.querySelector('jeep-sqlite');
+          if (jeepEl && typeof jeepEl.saveToStore === 'function') {
+            await jeepEl.saveToStore({ database: DB_NAME });
+            saved = true;
+          }
+        } catch (e3) {
+          console.warn('[DB] jeep-sqlite element saveToStore warning:', e3);
+        }
+      }
+    } while (saveQueued);
+  } finally {
+    isSaving = false;
   }
 };
 
@@ -184,42 +199,68 @@ if (typeof window !== 'undefined') {
 const wrapDbConnection = (rawDb) => {
   if (!isWebStore || !rawDb || rawDb.__wrapped) return rawDb;
 
+  let inTransaction = false;
+
   const originalRun = rawDb.run.bind(rawDb);
   const originalExecute = rawDb.execute.bind(rawDb);
   const originalExecuteSet = rawDb.executeSet ? rawDb.executeSet.bind(rawDb) : null;
+  const originalBegin = rawDb.beginTransaction ? rawDb.beginTransaction.bind(rawDb) : null;
   const originalCommit = rawDb.commitTransaction ? rawDb.commitTransaction.bind(rawDb) : null;
+  const originalRollback = rawDb.rollbackTransaction ? rawDb.rollbackTransaction.bind(rawDb) : null;
   const originalClose = rawDb.close ? rawDb.close.bind(rawDb) : null;
+
+  if (originalBegin) {
+    rawDb.beginTransaction = async (...args) => {
+      inTransaction = true;
+      return await originalBegin(...args);
+    };
+  }
 
   rawDb.run = async (...args) => {
     const res = await originalRun(...args);
-    await persistWebStore();
+    if (!inTransaction) {
+      await persistWebStore();
+    }
     return res;
   };
 
   rawDb.execute = async (...args) => {
     const res = await originalExecute(...args);
-    await persistWebStore();
+    if (!inTransaction) {
+      await persistWebStore();
+    }
     return res;
   };
 
   if (originalExecuteSet) {
     rawDb.executeSet = async (...args) => {
       const res = await originalExecuteSet(...args);
-      await persistWebStore();
+      if (!inTransaction) {
+        await persistWebStore();
+      }
       return res;
     };
   }
 
   if (originalCommit) {
     rawDb.commitTransaction = async (...args) => {
+      inTransaction = false;
       const res = await originalCommit(...args);
       await persistWebStore();
       return res;
     };
   }
 
+  if (originalRollback) {
+    rawDb.rollbackTransaction = async (...args) => {
+      inTransaction = false;
+      return await originalRollback(...args);
+    };
+  }
+
   if (originalClose) {
     rawDb.close = async (...args) => {
+      inTransaction = false;
       await persistWebStore();
       return await originalClose(...args);
     };
@@ -939,35 +980,62 @@ export const contractService = {
 
   async applyEarlySettlement(contractId, discountAmount) {
     const database = await getDatabase();
-    // Get contract and remaining installments
+    // Get contract
     const contract = await this.getById(contractId);
     if (!contract) throw new Error('Contract not found: ' + contractId);
 
-    const installments = await installmentService.getByContractId(contractId);
-    const unpaidInstallments = installments.filter(i => i.status !== 'paid');
+    const safeDiscount = Math.max(0, Number(discountAmount) || 0);
 
-    // Update contract with discount and mark as completed
-    await database.run(
-      `UPDATE contracts SET discount_amount = ?, status = 'completed' WHERE id = ?`,
-      [discountAmount, contractId]
-    );
+    let transactionStarted = false;
+    try {
+      await database.beginTransaction();
+      transactionStarted = true;
 
-    // Mark all unpaid installments as paid
-    for (const inst of unpaidInstallments) {
+      // 1. Update contract with discount and mark as completed
       await database.run(
-        `UPDATE installments SET status = 'paid', actual_paid = ?, paid_at = CURRENT_TIMESTAMP WHERE id = ?`,
-        [inst.amount, inst.id]
+        `UPDATE contracts SET discount_amount = ?, status = 'completed' WHERE id = ?`,
+        [safeDiscount, contractId],
+        false
       );
+
+      // 2. Mark all unpaid/postponed installments as paid in one atomic statement
+      await database.run(
+        `UPDATE installments SET status = 'paid', actual_paid = amount, paid_at = COALESCE(paid_at, CURRENT_TIMESTAMP) WHERE contract_id = ? AND status != 'paid'`,
+        [contractId],
+        false
+      );
+
+      await database.commitTransaction();
+      transactionStarted = false;
+    } catch (txErr) {
+      if (transactionStarted) {
+        try {
+          await database.rollbackTransaction();
+        } catch (rbErr) {
+          console.warn('applyEarlySettlement rollback failed:', rbErr);
+        }
+      }
+      throw txErr;
     }
 
+    // 3. Post-settlement status updates (non-fatal)
     try {
-      await customerService.setCurrentMonthStatus(contract.customer_id, 'paid');
+      if (contract.customer_id) {
+        await customerService.setCurrentMonthStatus(contract.customer_id, 'paid');
+      }
     } catch (statusError) {
       console.warn('Monthly status update failed:', statusError);
     }
 
     // Auto-archive customer if no more active contracts (non-fatal if it fails)
-    await customerService.checkAndArchive(contract.customer_id);
+    try {
+      if (contract.customer_id) {
+        await customerService.checkAndArchive(contract.customer_id);
+      }
+    } catch (archiveError) {
+      console.warn('checkAndArchive failed:', archiveError);
+    }
+
     notifyDataChanged({ scope: 'contracts', action: 'early-settlement', id: contractId, customerId: contract.customer_id });
   },
 
