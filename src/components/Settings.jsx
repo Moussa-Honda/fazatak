@@ -62,7 +62,7 @@ const Settings = ({ onSettingsChange, onLicenseRenewed, currentUser, onLogout })
     try {
       const backups = await googleDriveService.listBackups(15);
       if (!backups || backups.length === 0) {
-        setDriveError('لا توجد نسخ احتياطية لتطبيق فزتك على حساب Google Drive هذا.');
+        setDriveError('لا توجد نسخ احتياطية لتطبيق فزعتك على حساب Google Drive هذا.');
         return;
       }
       setDriveBackups(backups);
@@ -231,7 +231,7 @@ const Settings = ({ onSettingsChange, onLicenseRenewed, currentUser, onLogout })
   };
 
   const handleSupportWhatsApp = () => {
-    const message = `السلام عليكم، أريد تجديد اشتراك تطبيق فزتك. رقم الجهاز: ${deviceId || ''}`;
+    const message = `السلام عليكم، أريد تجديد اشتراك تطبيق فزعتك. رقم الجهاز: ${deviceId || ''}`;
     window.open(`https://wa.me/${SUPPORT_WHATSAPP_PHONE}?text=${encodeURIComponent(message)}`, '_blank');
   };
 
@@ -536,7 +536,7 @@ const Settings = ({ onSettingsChange, onLicenseRenewed, currentUser, onLogout })
               value={businessName}
               onChange={(e) => updateBusinessSetting('business_name', e.target.value, setBusinessName)}
               className="w-full bg-slate-900 border border-slate-600 rounded-xl px-4 py-3 text-white placeholder-slate-500 focus:border-blue-500 focus:outline-none transition-colors"
-              placeholder="مثال: مؤسسة فزتك للتقسيط"
+              placeholder="مثال: مؤسسة فزعتك للتقسيط"
             />
           </div>
 
@@ -688,7 +688,7 @@ const Settings = ({ onSettingsChange, onLicenseRenewed, currentUser, onLogout })
       </div>
 
       <div className="text-center text-slate-500 text-sm pt-4">
-        <p>نظام فزتك (fazatak) - مزامنة سحابية آمنة ومشفرة</p>
+        <p>نظام فزعتك (fazatak) - مزامنة سحابية آمنة ومشفرة</p>
       </div>
 
       {/* ── نافذة اختيار نسخة Google Drive للاسترجاع ── */}

@@ -275,7 +275,7 @@ const Dashboard = ({ isExpired, expiry, onReActivate, currentUser, onLogout }) =
   const selectedAlertItems = selectedAlertType ? (homeAlerts?.[selectedAlertType] || []) : [];
 
   const handleSupportWhatsApp = () => {
-    const message = 'السلام عليكم، أريد تجديد اشتراك تطبيق فزتك.';
+    const message = 'السلام عليكم، أريد تجديد اشتراك تطبيق فزعتك.';
     window.open(`https://wa.me/${SUPPORT_WHATSAPP_PHONE}?text=${encodeURIComponent(message)}`, '_blank');
   };
 

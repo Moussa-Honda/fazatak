@@ -148,3 +148,16 @@ input:focus, textarea:focus, select:focus {
 .btn-warning {
   @apply bg-amber-500 text-white font-semibold shadow-lg shadow-amber-500/30;
 }
+
+/* Autofill dark styling for Chrome/Edge/Safari/WebView */
+input:-webkit-autofill,
+input:-webkit-autofill:hover, 
+input:-webkit-autofill:focus, 
+input:-webkit-autofill:active {
+  -webkit-box-shadow: 0 0 0 1000px #090d16 inset !important;
+  -webkit-text-fill-color: #f8fafc !important;
+  caret-color: #34d399 !important;
+  border-color: #059669 !important;
+  transition: background-color 5000s ease-in-out 0s;
+}
+
