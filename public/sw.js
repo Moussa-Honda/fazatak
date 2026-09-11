@@ -3,7 +3,7 @@
 // استراتيجية: Cache First للـ assets + Offline fallback للـ navigation
 // ============================================================
 
-const CACHE_VERSION = 'v2.2.5';
+const CACHE_VERSION = 'v2.3.0';
 const CACHE_NAME = `fazatak-cache-${CACHE_VERSION}`;
 const OFFLINE_PAGE = '/index.html';
 
@@ -76,6 +76,46 @@ self.addEventListener('activate', (event) => {
     ).then(() => {
       console.log(`[SW] Activated cache: ${CACHE_NAME}`);
       return self.clients.claim();
+    })
+  );
+});
+
+// ─────────────────────────────────────────────
+// PUSH: إشعارات Safari PWA وChrome PWA
+// ─────────────────────────────────────────────
+self.addEventListener('push', (event) => {
+  let payload = {};
+  try {
+    payload = event.data?.json() || {};
+  } catch {
+    payload = { body: event.data?.text() || '' };
+  }
+
+  const title = payload.title || 'فزعتك';
+  const options = {
+    body: payload.body || 'لديك تحديث جديد في فزعتك',
+    icon: payload.icon || '/icons/icon-192.png',
+    badge: payload.badge || '/icons/icon-96.png',
+    tag: payload.tag || 'fazatak-notification',
+    renotify: Boolean(payload.renotify),
+    data: payload.data || { url: '/' },
+  };
+
+  event.waitUntil(self.registration.showNotification(title, options));
+});
+
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close();
+  const targetUrl = event.notification.data?.url || '/';
+
+  event.waitUntil(
+    self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clients) => {
+      const existing = clients.find((client) => 'focus' in client);
+      if (existing) {
+        existing.navigate(targetUrl);
+        return existing.focus();
+      }
+      return self.clients.openWindow(targetUrl);
     })
   );
 });
