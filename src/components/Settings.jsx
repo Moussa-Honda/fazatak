@@ -388,7 +388,15 @@ const Settings = ({ onSettingsChange, onLicenseRenewed, currentUser, onLogout, i
       const result = await notificationService.setEnabled(!notificationsEnabled);
       setNotificationsEnabled(result.enabled);
 
-      if (!result.enabled && notificationsEnabled) {
+      if (result.permission === 'unsupported') {
+        setNotificationStatus('تنبيهات Safari تتطلب تثبيت التطبيق على الشاشة الرئيسية واستخدام iOS 16.4 أو أحدث.');
+      } else if (result.permission === 'not_configured') {
+        setNotificationStatus('لم يتم إعداد خادم إشعارات Safari بعد.');
+      } else if (result.permission === 'not_authenticated') {
+        setNotificationStatus('يرجى تسجيل الدخول قبل تفعيل تنبيهات الجهاز.');
+      } else if (result.permission === 'denied') {
+        setNotificationStatus('تم رفض صلاحية الإشعارات من إعدادات الجهاز.');
+      } else if (!result.enabled && notificationsEnabled) {
         setNotificationStatus('تم إيقاف تنبيهات الأقساط');
       } else if (!result.enabled) {
         setNotificationStatus('لم يتم منح صلاحية الإشعارات من النظام');
@@ -421,7 +429,15 @@ const Settings = ({ onSettingsChange, onLicenseRenewed, currentUser, onLogout, i
       setNotificationStatus('سيظهر إشعار اختباري بعد ثوانٍ');
       const result = await notificationService.sendTestNotification();
       if (!result.sent) {
-        setNotificationStatus('لم يتم منح صلاحية الإشعارات من النظام');
+        if (result.permission === 'unsupported') {
+          setNotificationStatus('تنبيهات Safari تتطلب تثبيت التطبيق على الشاشة الرئيسية واستخدام iOS 16.4 أو أحدث.');
+        } else if (result.permission === 'not_configured') {
+          setNotificationStatus('لم يتم إعداد خادم إشعارات Safari بعد.');
+        } else if (result.permission === 'denied') {
+          setNotificationStatus('تم رفض صلاحية الإشعارات من إعدادات الجهاز.');
+        } else {
+          setNotificationStatus('تعذر إرسال الإشعار الاختباري');
+        }
       }
     } catch (error) {
       console.error('Test notification error:', error);
