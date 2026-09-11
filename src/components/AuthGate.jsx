@@ -126,7 +126,7 @@ const AuthGate = ({ onAuthenticated, isExpired = false, initialUser = null }) =>
 
   const handleSupportWhatsApp = () => {
     const phone = currentUser?.phone || loginPhone || '';
-    const message = `السلام عليكم، أريد تجديد اشتراك تطبيق اقساطي لرقم الحساب: ${phone}`;
+    const message = `السلام عليكم، أريد تجديد اشتراك تطبيق أقساطي لرقم الحساب: ${phone}`;
     window.open(`https://wa.me/${SUPPORT_WHATSAPP_PHONE}?text=${encodeURIComponent(message)}`, '_blank');
   };
 
@@ -166,12 +166,12 @@ const AuthGate = ({ onAuthenticated, isExpired = false, initialUser = null }) =>
           <div className="relative mx-auto w-16 h-16 mb-3">
             <div className="absolute inset-0 bg-emerald-500/25 rounded-2xl blur-md" />
             <div className="auth-brand-mark relative w-16 h-16 bg-gradient-to-b from-slate-800 to-slate-900 rounded-2xl border border-emerald-500/40 shadow-inner flex items-center justify-center p-1.5">
-               <img src="/logo-mark.svg" alt="شعار اقساطي" className="w-full h-full" />
+               <img src="/logo-mark.svg" alt="شعار أقساطي" className="w-full h-full" />
             </div>
           </div>
 
           <h1 className="text-3xl font-black text-white tracking-wide flex items-center justify-center gap-2">
-             <span>اقساطي</span>
+             <span>أقساطي</span>
             <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">سحابي</span>
           </h1>
           <p className="auth-tagline text-slate-400 text-xs mt-1.5 font-medium">أدر التزاماتك بثقة، واترك التفاصيل علينا</p>
@@ -604,7 +604,7 @@ const AuthGate = ({ onAuthenticated, isExpired = false, initialUser = null }) =>
         <div className="auth-trust py-3.5 px-6 bg-slate-950/80 border-t border-slate-800/80 text-center flex items-center justify-center gap-2">
           <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
           <p className="text-[11px] text-slate-400 font-medium">
-             كافة المعاملات مشفرة ومحمية بسحابة اقساطي الآمنة
+             كافة المعاملات مشفرة ومحمية بسحابة أقساطي الآمنة
           </p>
         </div>
 
