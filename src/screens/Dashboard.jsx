@@ -330,7 +330,7 @@ const Dashboard = ({ isExpired, expiry, onReActivate, currentUser, onLogout }) =
   const remainingText = getRemainingDays();
 
   const handleSupportWhatsApp = () => {
-    const message = 'السلام عليكم، أريد تجديد اشتراك تطبيق اقساطي.';
+    const message = 'السلام عليكم، أريد تجديد اشتراك تطبيق أقساطي.';
     window.open(`https://wa.me/${SUPPORT_WHATSAPP_PHONE}?text=${encodeURIComponent(message)}`, '_blank');
   };
 
@@ -441,10 +441,10 @@ const Dashboard = ({ isExpired, expiry, onReActivate, currentUser, onLogout }) =
             <div className="dashboard-topbar p-4 flex items-center justify-between border-b" style={{ paddingTop: 'calc(env(safe-area-inset-top, 0px) + 16px)' }}>
               <div className="flex items-center gap-3">
                 <div className="w-10 h-10 rounded-2xl bg-emerald-500/10 border border-emerald-400/30 flex items-center justify-center">
-                  <img src="/logo-mark.svg" alt="شعار اقساطي" className="w-full h-full rounded-2xl" />
+                  <img src="/logo-mark.svg" alt="شعار أقساطي" className="w-full h-full rounded-2xl" />
                 </div>
                 <div>
-                   <p className="brand-serif text-xl leading-none text-white">اقساطي</p>
+                   <p className="brand-serif text-xl leading-none text-white">أقساطي</p>
                 </div>
               </div>
               <MotivationalTicker enabled={showMotivationalTicker} startedAt={tickerStartedAt} />
