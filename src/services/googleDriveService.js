@@ -91,7 +91,7 @@ export const googleDriveService = {
     const metadata = {
       name: fileName,
       mimeType: 'application/json',
-      description: `نسخة احتياطية لتطبيق اقساطي - ${new Date().toLocaleString('ar-SA')}`
+      description: `نسخة احتياطية لتطبيق أقساطي - ${new Date().toLocaleString('ar-SA')}`
     };
 
     const boundary = '-------FazatakBackupBoundary' + Date.now();
