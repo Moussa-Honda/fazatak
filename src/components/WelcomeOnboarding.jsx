@@ -27,7 +27,7 @@ const slides = [
     gradient: 'from-indigo-600/20 via-blue-600/10 to-transparent',
     accent: 'indigo',
     accentHex: '#6366f1',
-    title: 'أهلاً بك في فزعتك',
+    title: 'أهلاً بك في اقساطي',
     subtitle: 'وضوح مالي، من أول قسط',
     description: 'مساحتك الهادئة لإدارة الأقساط والديون والعملاء، بقرارات أسرع وتفاصيل أقل تشتيتاً.',
   },
@@ -249,8 +249,8 @@ export default function WelcomeOnboarding({ onComplete }) {
         </button>
         {/* App name */}
         <span className="onboarding-brand flex items-center gap-2">
-          <img src="/logo-mark.svg" alt="شعار فزعتك" className="w-8 h-8 rounded-xl" />
-          <span>فزعتك</span>
+          <img src="/logo-mark.svg" alt="شعار اقساطي" className="w-8 h-8 rounded-xl" />
+          <span>اقساطي</span>
         </span>
       </div>
 
