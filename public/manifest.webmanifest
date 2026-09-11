@@ -1,6 +1,7 @@
 {
-  "name": "اقساطي للأقساط والديون",
-  "short_name": "اقساطي",
+  "id": "/?app=aqasti",
+  "name": "أقساطي للأقساط والديون",
+  "short_name": "أقساطي",
   "description": "إدارة الأقساط والديون والعقود والعملاء بوضوح وهدوء",
   "start_url": "/",
   "scope": "/",
@@ -12,7 +13,7 @@
   "lang": "ar",
   "icons": [
     {
-      "src": "/logo-mark.svg",
+      "src": "/logo-aqasti.svg",
       "type": "image/svg+xml",
       "sizes": "any",
       "purpose": "any"
