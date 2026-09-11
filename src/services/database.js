@@ -359,7 +359,8 @@ const createTables = async () => {
       is_vip INTEGER DEFAULT 0,
       late_payments INTEGER DEFAULT 0,
       status TEXT DEFAULT 'active' CHECK(status IN ('active', 'archived')),
-      manager_id INTEGER,
+       manager_id INTEGER,
+       deleted_manager_id INTEGER,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       is_manually_flagged_as_overdue INTEGER DEFAULT 0,
       FOREIGN KEY (manager_id) REFERENCES managers(id) ON DELETE SET NULL
@@ -368,7 +369,9 @@ const createTables = async () => {
     CREATE TABLE IF NOT EXISTS managers (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       name TEXT NOT NULL,
-      phone TEXT,
+       phone TEXT,
+       is_deleted INTEGER DEFAULT 0,
+       deleted_at DATETIME,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );
 
@@ -496,9 +499,21 @@ const createTables = async () => {
     await db.run(`UPDATE installments SET actual_paid = amount WHERE status = 'paid' AND (actual_paid IS NULL OR actual_paid = 0)`);
   } catch {}
 
-  // Ensure manager_id column exists for existing users
+  // Ensure manager-related columns exist for existing users
   try {
     await db.execute('ALTER TABLE customers ADD COLUMN manager_id INTEGER');
+  } catch {}
+
+  try {
+    await db.execute('ALTER TABLE customers ADD COLUMN deleted_manager_id INTEGER');
+  } catch {}
+
+  try {
+    await db.execute('ALTER TABLE managers ADD COLUMN is_deleted INTEGER DEFAULT 0');
+  } catch {}
+
+  try {
+    await db.execute('ALTER TABLE managers ADD COLUMN deleted_at DATETIME');
   } catch {}
 
   // Ensure is_manually_flagged_as_overdue column exists for existing users
@@ -514,6 +529,7 @@ const createTables = async () => {
 
   await db.execute(`
     CREATE INDEX IF NOT EXISTS idx_customers_manager_deleted_status ON customers(manager_id, is_deleted, status);
+    CREATE INDEX IF NOT EXISTS idx_customers_deleted_manager ON customers(deleted_manager_id);
     CREATE INDEX IF NOT EXISTS idx_customers_manual_overdue ON customers(is_manually_flagged_as_overdue);
     CREATE INDEX IF NOT EXISTS idx_contracts_customer_status ON contracts(customer_id, status);
     CREATE INDEX IF NOT EXISTS idx_installments_contract_status_due ON installments(contract_id, status, due_date);
@@ -562,6 +578,7 @@ export const customerService = {
     
     if (managerId === 'personal') {
       sql += ` AND (manager_id IS NULL OR manager_id = '' OR manager_id = 0)`;
+      sql += ` AND (deleted_manager_id IS NULL OR deleted_manager_id = 0)`;
     } else if (managerId !== null && managerId !== undefined && managerId !== '') {
       sql += ` AND manager_id = ?`;
       params.push(Number(managerId) || managerId);
@@ -1543,9 +1560,12 @@ export const installmentService = {
       JOIN customers cu ON c.customer_id = cu.id
       LEFT JOIN managers m ON cu.manager_id = m.id
       WHERE i.status = 'pending' 
-      AND c.status = 'active'
-      AND (cu.is_deleted IS NULL OR cu.is_deleted = 0)
-      AND i.due_date BETWEEN date('now') AND date('now', '+${days} days')
+       AND c.status = 'active'
+       AND (cu.is_deleted IS NULL OR cu.is_deleted = 0)
+       AND (cu.manager_id IS NULL OR cu.manager_id = 0 OR cu.manager_id = '')
+       AND (cu.deleted_manager_id IS NULL OR cu.deleted_manager_id = 0)
+       AND (m.id IS NULL OR m.is_deleted IS NULL OR m.is_deleted = 0)
+       AND i.due_date BETWEEN date('now') AND date('now', '+${days} days')
       ORDER BY i.due_date ASC
     `;
     const result = await database.query(sql);
@@ -1561,9 +1581,12 @@ export const installmentService = {
       JOIN customers cu ON c.customer_id = cu.id
       LEFT JOIN managers m ON cu.manager_id = m.id
       WHERE i.status = 'pending' 
-      AND c.status = 'active'
-      AND (cu.is_deleted IS NULL OR cu.is_deleted = 0)
-      AND i.due_date < date('now')
+       AND c.status = 'active'
+       AND (cu.is_deleted IS NULL OR cu.is_deleted = 0)
+       AND (cu.manager_id IS NULL OR cu.manager_id = 0 OR cu.manager_id = '')
+       AND (cu.deleted_manager_id IS NULL OR cu.deleted_manager_id = 0)
+       AND (m.id IS NULL OR m.is_deleted IS NULL OR m.is_deleted = 0)
+       AND i.due_date < date('now')
       ORDER BY i.due_date ASC
     `;
     const result = await database.query(sql);
@@ -1587,9 +1610,12 @@ export const installmentService = {
       LEFT JOIN managers m ON cu.manager_id = m.id
       WHERE i.status = 'pending'
       AND c.status = 'active'
-      AND (cu.status IS NULL OR cu.status = 'active')
-      AND (cu.is_deleted IS NULL OR cu.is_deleted = 0)
-      AND (cu.is_manually_flagged_as_overdue IS NULL OR cu.is_manually_flagged_as_overdue = 0)
+       AND (cu.status IS NULL OR cu.status = 'active')
+       AND (cu.is_deleted IS NULL OR cu.is_deleted = 0)
+       AND (cu.manager_id IS NULL OR cu.manager_id = 0 OR cu.manager_id = '')
+       AND (cu.deleted_manager_id IS NULL OR cu.deleted_manager_id = 0)
+       AND (m.id IS NULL OR m.is_deleted IS NULL OR m.is_deleted = 0)
+       AND (cu.is_manually_flagged_as_overdue IS NULL OR cu.is_manually_flagged_as_overdue = 0)
       AND NOT EXISTS (
         SELECT 1
         FROM installments oi
@@ -1725,6 +1751,7 @@ export const dashboardService = {
       JOIN customers cu ON c.customer_id = cu.id
       WHERE c.status = 'active' 
       AND (cu.manager_id IS NULL OR cu.manager_id = 0 OR cu.manager_id = '')
+      AND (cu.deleted_manager_id IS NULL OR cu.deleted_manager_id = 0)
       AND (cu.is_manually_flagged_as_overdue IS NULL OR cu.is_manually_flagged_as_overdue = 0)
       AND (cu.is_deleted IS NULL OR cu.is_deleted = 0)
     `);
@@ -1737,6 +1764,7 @@ export const dashboardService = {
       JOIN customers cu ON c.customer_id = cu.id
       WHERE c.status = 'active'
       AND (cu.manager_id IS NULL OR cu.manager_id = 0 OR cu.manager_id = '')
+      AND (cu.deleted_manager_id IS NULL OR cu.deleted_manager_id = 0)
       AND (cu.is_manually_flagged_as_overdue IS NULL OR cu.is_manually_flagged_as_overdue = 0)
       AND (cu.is_deleted IS NULL OR cu.is_deleted = 0)
     `);
@@ -1765,6 +1793,7 @@ export const dashboardService = {
       AND cu.manager_id IS NOT NULL 
       AND cu.manager_id != 0 
       AND cu.manager_id != ''
+      AND (m.is_deleted IS NULL OR m.is_deleted = 0)
       AND cu.status != 'archived'
       AND (cu.is_manually_flagged_as_overdue IS NULL OR cu.is_manually_flagged_as_overdue = 0)
       AND (cu.is_deleted IS NULL OR cu.is_deleted = 0)
@@ -1780,6 +1809,7 @@ export const dashboardService = {
       AND cu.manager_id IS NOT NULL 
       AND cu.manager_id != 0 
       AND cu.manager_id != ''
+      AND (m.is_deleted IS NULL OR m.is_deleted = 0)
       AND cu.status != 'archived'
       AND (cu.is_manually_flagged_as_overdue IS NULL OR cu.is_manually_flagged_as_overdue = 0)
       AND (cu.is_deleted IS NULL OR cu.is_deleted = 0)
@@ -1888,8 +1918,11 @@ export const managerService = {
     return id;
   },
 
-  async getAllWithStats() {
+  async getAllWithStats(includeDeleted = false) {
     const database = await getDatabase();
+    const managerStateFilter = includeDeleted
+      ? `m.is_deleted = 1`
+      : `(m.is_deleted IS NULL OR m.is_deleted = 0)`;
     const sql = `
       SELECT 
         m.*,
@@ -1915,6 +1948,7 @@ export const managerService = {
           AND (cu2.is_deleted IS NULL OR cu2.is_deleted = 0)
         ) as total_paid
       FROM managers m
+      WHERE ${managerStateFilter}
       ORDER BY m.created_at DESC
     `;
     const result = await database.query(sql);
@@ -1939,8 +1973,46 @@ export const managerService = {
 
   async delete(id) {
     const database = await getDatabase();
-    await database.run(`DELETE FROM managers WHERE id = ?`, [id]);
+    await database.run(
+      `UPDATE managers SET is_deleted = 1, deleted_at = CURRENT_TIMESTAMP WHERE id = ?`,
+      [id]
+    );
     notifyDataChanged({ scope: 'managers', action: 'delete', id });
+  },
+
+  async restore(id) {
+    const database = await getDatabase();
+    await database.run(
+      `UPDATE managers SET is_deleted = 0, deleted_at = NULL WHERE id = ? AND is_deleted = 1`,
+      [id]
+    );
+    notifyDataChanged({ scope: 'managers', action: 'restore', id });
+  },
+
+  async hardDelete(id) {
+    const database = await getDatabase();
+    await database.run(
+      `UPDATE customers
+       SET deleted_manager_id = manager_id, manager_id = NULL
+       WHERE manager_id = ?`,
+      [id]
+    );
+    await database.run(`DELETE FROM managers WHERE id = ? AND is_deleted = 1`, [id]);
+    notifyDataChanged({ scope: 'managers', action: 'hard-delete', id });
+  },
+
+  async cleanupDeleted() {
+    const database = await getDatabase();
+    const result = await database.query(
+      `SELECT id FROM managers
+       WHERE is_deleted = 1
+       AND deleted_at IS NOT NULL
+       AND deleted_at <= datetime('now', '-7 days')`
+    );
+
+    for (const manager of result.values || []) {
+      await this.hardDelete(manager.id);
+    }
   },
 
   async getManagersWithOverdueCount(overdueThreshold = 30) {
@@ -2013,6 +2085,7 @@ export const managerService = {
           )
           AND (cu.is_deleted IS NULL OR cu.is_deleted = 0)
         ) > 0
+        AND (m.is_deleted IS NULL OR m.is_deleted = 0)
       `;
       const result = await database.query(sql);
       return (result.values || []).map(m => ({
