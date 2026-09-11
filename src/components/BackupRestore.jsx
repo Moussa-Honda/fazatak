@@ -160,7 +160,7 @@ const BackupRestore = ({ isOpen, onClose }) => {
       return await googleDriveService.listBackups(10);
     });
     if (!backups || backups.length === 0) {
-      setError('لا توجد نسخ احتياطية لتطبيق اقساطي على حساب Google Drive هذا.');
+      setError('لا توجد نسخ احتياطية لتطبيق أقساطي على حساب Google Drive هذا.');
       return;
     }
     setGoogleDriveBackups(backups);
