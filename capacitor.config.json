@@ -1,6 +1,6 @@
 {
   "appId": "com.installment.app",
-  "appName": "اقساطي للأقساط والديون",
+  "appName": "أقساطي للأقساط والديون",
   "webDir": "dist",
   "plugins": {
     "BiometricAuth": {
