@@ -38,7 +38,7 @@ const AppLockScreen = ({ onUnlock }) => {
   return (
     <div className="premium-auth fixed inset-0 z-[99999] flex items-center justify-center p-4" dir="rtl">
       <div className="auth-card w-full max-w-sm rounded-3xl border border-slate-800 p-6 text-center shadow-2xl">
-        <img src="/logo-mark.svg" alt="شعار فزعتك" className="mx-auto mb-4 h-16 w-16" />
+        <img src="/logo-mark.svg" alt="شعار اقساطي" className="mx-auto mb-4 h-16 w-16" />
         <h1 className="text-2xl font-black text-white">التطبيق مقفل</h1>
         <p className="mt-2 text-sm text-slate-400">أدخل رمز القفل للوصول إلى بياناتك</p>
         <form onSubmit={handleUnlock} className="mt-6 space-y-4">
