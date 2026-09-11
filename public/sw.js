@@ -1,5 +1,5 @@
 // ============================================================
-// فزعتك للأقساط والديون - Service Worker
+// اقساطي للأقساط والديون - Service Worker
 // استراتيجية: Cache First للـ assets + Offline fallback للـ navigation
 // ============================================================
 
@@ -91,9 +91,9 @@ self.addEventListener('push', (event) => {
     payload = { body: event.data?.text() || '' };
   }
 
-  const title = payload.title || 'فزعتك';
+  const title = payload.title || 'اقساطي';
   const options = {
-    body: payload.body || 'لديك تحديث جديد في فزعتك',
+    body: payload.body || 'لديك تحديث جديد في اقساطي',
     icon: payload.icon || '/icons/icon-192.png',
     badge: payload.badge || '/icons/icon-96.png',
     tag: payload.tag || 'fazatak-notification',
@@ -308,7 +308,7 @@ function buildOfflineFallbackPage() {
 <head>
   <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width,initial-scale=1"/>
-  <title>فزعتك - غير متصل</title>
+   <title>اقساطي - غير متصل</title>
   <style>
     *{box-sizing:border-box;margin:0;padding:0}
     body{font-family:system-ui,sans-serif;background:#0f172a;color:#e2e8f0;
@@ -328,7 +328,7 @@ function buildOfflineFallbackPage() {
   <div class="card">
     <div class="icon">📡</div>
     <h1>أنت غير متصل</h1>
-    <p>يبدو أن الاتصال بالإنترنت منقطع. فزعتك يعمل بالكامل بدون إنترنت بعد أول تحميل.</p>
+     <p>يبدو أن الاتصال بالإنترنت منقطع. اقساطي يعمل بالكامل بدون إنترنت بعد أول تحميل.</p>
     <button onclick="window.location.reload()">🔄 إعادة المحاولة</button>
     <p class="tip">💡 تأكد من أن التطبيق قد فتح مرة واحدة على الأقل وأنت متصل بالإنترنت لتفعيل وضع الـ Offline</p>
   </div>
