@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { Capacitor } from '@capacitor/core';
 import { settingsService } from '../services/database';
 import { notificationService } from '../services/notificationService';
 import licenseService from '../services/license';
@@ -151,6 +152,7 @@ const Settings = ({ onSettingsChange, onLicenseRenewed, currentUser, onLogout, i
   const [overdueNotificationsEnabled, setOverdueNotificationsEnabled] = useState(true);
   const [notificationStatus, setNotificationStatus] = useState('');
   const [whatsappTemplate, setWhatsappTemplate] = useState('');
+  const [updatingSetting, setUpdatingSetting] = useState(null);
 
   const [businessName, setBusinessName] = useState('');
   const [businessContact, setBusinessContact] = useState('');
@@ -284,21 +286,29 @@ const Settings = ({ onSettingsChange, onLicenseRenewed, currentUser, onLogout, i
   };
 
   const toggleSetting = async (key, value, setter) => {
-    try {
-      const newValue = !value;
-      await settingsService.set(key, newValue.toString());
-      setter(newValue);
-      onSettingsChange?.();
+    if (updatingSetting) return;
 
-      if (key === 'screen_privacy') {
+    const newValue = !value;
+    setter(newValue);
+    setUpdatingSetting(key);
+
+    try {
+      await settingsService.set(key, newValue.toString());
+
+      if (key === 'screen_privacy' && Capacitor.isNativePlatform()) {
         if (newValue) {
           await PrivacyScreen.enable();
         } else {
           await PrivacyScreen.disable();
         }
       }
+
+      onSettingsChange?.();
     } catch (e) {
       console.error(e);
+      setter(value);
+    } finally {
+      setUpdatingSetting(null);
     }
   };
 
