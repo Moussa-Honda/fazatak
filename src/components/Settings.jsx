@@ -81,7 +81,7 @@ const Settings = ({ onSettingsChange, onLicenseRenewed, currentUser, onLogout, i
     try {
       const backups = await googleDriveService.listBackups(15);
       if (!backups || backups.length === 0) {
-        setDriveError('لا توجد نسخ احتياطية لتطبيق فزعتك على حساب Google Drive هذا.');
+        setDriveError('لا توجد نسخ احتياطية لتطبيق اقساطي على حساب Google Drive هذا.');
         return;
       }
       setDriveBackups(backups);
@@ -158,6 +158,10 @@ const Settings = ({ onSettingsChange, onLicenseRenewed, currentUser, onLogout, i
   const [businessContact, setBusinessContact] = useState('');
   const [taxNumber, setTaxNumber] = useState('');
   const [showDetailsOnPdf, setShowDetailsOnPdf] = useState(false);
+  const [pdfStampEnabled, setPdfStampEnabled] = useState(false);
+  const [pdfStampImage, setPdfStampImage] = useState('');
+  const [pdfStampText, setPdfStampText] = useState('');
+  const [pdfStampError, setPdfStampError] = useState('');
   const [deviceId, setDeviceId] = useState('');
   const [licenseExpiry, setLicenseExpiry] = useState(null);
   const [renewalCode, setRenewalCode] = useState('');
@@ -169,7 +173,7 @@ const Settings = ({ onSettingsChange, onLicenseRenewed, currentUser, onLogout, i
     try {
       const [
         quick, privacy, screenPrivacyValue,
-        bizName, bizContact, taxNo, showPdf, overThreshold, stagThreshold,
+        bizName, bizContact, taxNo, showPdf, stampEnabled, stampImage, stampText, overThreshold, stagThreshold,
         notifEnabled, notifDays, notifTime, notifOverdue, whatsappText,
          showCustody, showTicker
       ] = await Promise.all([
@@ -180,6 +184,9 @@ const Settings = ({ onSettingsChange, onLicenseRenewed, currentUser, onLogout, i
         settingsService.get('business_contact'),
         settingsService.get('tax_number'),
         settingsService.get('show_details_on_pdf'),
+        settingsService.get('pdf_stamp_enabled'),
+        settingsService.get('pdf_stamp_image'),
+        settingsService.get('pdf_stamp_text'),
         settingsService.get('overdue_threshold_days'),
         settingsService.get('stagnancy_threshold_days'),
         settingsService.get('installment_notifications_enabled'),
@@ -200,6 +207,9 @@ const Settings = ({ onSettingsChange, onLicenseRenewed, currentUser, onLogout, i
       setBusinessContact(bizContact || '');
       setTaxNumber(taxNo || '');
       setShowDetailsOnPdf(showPdf === 'true');
+      setPdfStampEnabled(stampEnabled === 'true');
+      setPdfStampImage(stampImage || '');
+      setPdfStampText(stampText || '');
       setOverdueThreshold(parseInt(overThreshold) || 30);
       setStagnancyThreshold(parseInt(stagThreshold) || 90);
       setNotificationsEnabled(notifEnabled === 'true');
@@ -254,7 +264,7 @@ const Settings = ({ onSettingsChange, onLicenseRenewed, currentUser, onLogout, i
   };
 
   const handleSupportWhatsApp = () => {
-    const message = `السلام عليكم، أريد تجديد اشتراك تطبيق فزعتك. رقم الجهاز: ${deviceId || ''}`;
+    const message = `السلام عليكم، أريد تجديد اشتراك تطبيق اقساطي. رقم الجهاز: ${deviceId || ''}`;
     window.open(`https://wa.me/${SUPPORT_WHATSAPP_PHONE}?text=${encodeURIComponent(message)}`, '_blank');
   };
 
@@ -457,6 +467,39 @@ const Settings = ({ onSettingsChange, onLicenseRenewed, currentUser, onLogout, i
     onSettingsChange?.();
   };
 
+  const handlePdfStampImageChange = (event) => {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file) return;
+
+    if (!file.type.startsWith('image/')) {
+      setPdfStampError('يرجى اختيار صورة للختم أو التوقيع.');
+      return;
+    }
+
+    if (file.size > 2 * 1024 * 1024) {
+      setPdfStampError('حجم صورة الختم أو التوقيع يجب ألا يتجاوز 2 ميجابايت.');
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = async () => {
+      const dataUrl = String(reader.result || '');
+      setPdfStampImage(dataUrl);
+      setPdfStampError('');
+      await settingsService.set('pdf_stamp_image', dataUrl);
+      onSettingsChange?.();
+    };
+    reader.onerror = () => setPdfStampError('تعذر قراءة صورة الختم أو التوقيع.');
+    reader.readAsDataURL(file);
+  };
+
+  const clearPdfStampImage = async () => {
+    setPdfStampImage('');
+    await settingsService.set('pdf_stamp_image', '');
+    onSettingsChange?.();
+  };
+
   return (
     <div className="p-4 space-y-6 overflow-y-auto custom-scrollbar h-full bg-slate-900 pb-20" style={{ paddingTop: 'calc(env(safe-area-inset-top, 0px) + 16px)' }}>
       
@@ -519,7 +562,7 @@ const Settings = ({ onSettingsChange, onLicenseRenewed, currentUser, onLogout, i
                 <button
                   type="button"
                   onClick={() => {
-                    const message = `السلام عليكم، أريد تجديد اشتراك تطبيق فزعتك لرقم الحساب: ${currentUser?.phone || ''}`;
+                    const message = `السلام عليكم، أريد تجديد اشتراك تطبيق اقساطي لرقم الحساب: ${currentUser?.phone || ''}`;
                     window.open(`https://wa.me/${SUPPORT_WHATSAPP_PHONE}?text=${encodeURIComponent(message)}`, '_blank');
                   }}
                   className="px-3.5 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl font-bold text-xs shadow transition-all active:scale-95 cursor-pointer flex items-center gap-1"
@@ -662,7 +705,7 @@ const Settings = ({ onSettingsChange, onLicenseRenewed, currentUser, onLogout, i
         <ToggleItem title="حماية الشاشة" description="منع لقطات الشاشة وتسجيل الفيديو" value={screenPrivacy} onToggle={() => toggleSetting('screen_privacy', screenPrivacy, setScreenPrivacy)} icon="📸" />
         <ToggleItem title="التاريخ الهجري" description="عرض التاريخ الهجري" value={hijriCalendar} onToggle={() => toggleSetting('hijri_calendar', hijriCalendar, setHijriCalendar)} icon="📅" />
         <ToggleItem title="قسم العهد" description="إظهار قسم العهد في الشريط السفلي" value={showCustodySection} onToggle={() => toggleSetting('show_custody_section', showCustodySection, setShowCustodySection)} icon="💼" />
-        <ToggleItem title="الرسائل التحفيزية" description="عرض آية أو ذكر أو عبارة تشجيعية بجانب شعار فزعتك" value={showMotivationalTicker} onToggle={() => toggleSetting('show_motivational_ticker', showMotivationalTicker, setShowMotivationalTicker)} icon="✨" />
+         <ToggleItem title="الرسائل التحفيزية" description="عرض آية أو ذكر أو عبارة تشجيعية بجانب شعار اقساطي" value={showMotivationalTicker} onToggle={() => toggleSetting('show_motivational_ticker', showMotivationalTicker, setShowMotivationalTicker)} icon="✨" />
       </div>
 
       {/* Account Security Section */}
@@ -811,7 +854,7 @@ const Settings = ({ onSettingsChange, onLicenseRenewed, currentUser, onLogout, i
               value={businessName}
               onChange={(e) => updateBusinessSetting('business_name', e.target.value, setBusinessName)}
               className="w-full bg-slate-900 border border-slate-600 rounded-xl px-4 py-3 text-white placeholder-slate-500 focus:border-blue-500 focus:outline-none transition-colors"
-              placeholder="مثال: مؤسسة فزعتك للتقسيط"
+               placeholder="مثال: مؤسسة اقساطي للتقسيط"
             />
           </div>
 
@@ -837,6 +880,57 @@ const Settings = ({ onSettingsChange, onLicenseRenewed, currentUser, onLogout, i
               placeholder="مثال: 300000000000003"
               dir="ltr"
             />
+          </div>
+
+          <div className="pt-4 border-t border-slate-700/50 space-y-4">
+            <ToggleItem
+              title="إظهار الختم أو التوقيع في PDF"
+              description="إضافة صورة الختم أو التوقيع إلى أسفل كل كشف أو إيصال"
+              value={pdfStampEnabled}
+              onToggle={() => toggleSetting('pdf_stamp_enabled', pdfStampEnabled, setPdfStampEnabled)}
+              icon="🖋️"
+            />
+
+            {pdfStampEnabled && (
+              <div className="space-y-3 rounded-xl border border-slate-700 bg-slate-900/60 p-4">
+                <div>
+                  <label className="block text-sm text-slate-400 mb-2">صورة الختم أو التوقيع</label>
+                  <input
+                    type="file"
+                    accept="image/png,image/jpeg,image/webp"
+                    onChange={handlePdfStampImageChange}
+                    className="w-full text-xs text-slate-400 file:mr-3 file:rounded-lg file:border-0 file:bg-emerald-600 file:px-3 file:py-2 file:font-bold file:text-white hover:file:bg-emerald-500"
+                  />
+                  <p className="text-[11px] text-slate-500 mt-2">PNG شفاف أو JPG أو WebP، بحد أقصى 2 ميجابايت.</p>
+                  {pdfStampError && <p className="text-xs text-rose-300 mt-2">{pdfStampError}</p>}
+                </div>
+
+                {pdfStampImage && (
+                  <div className="flex items-center justify-between gap-3 rounded-lg border border-slate-700 bg-slate-950 p-3">
+                    <img src={pdfStampImage} alt="معاينة الختم أو التوقيع" className="h-16 max-w-40 object-contain" />
+                    <button
+                      type="button"
+                      onClick={clearPdfStampImage}
+                      className="rounded-lg bg-rose-500/10 px-3 py-2 text-xs font-bold text-rose-300 hover:bg-rose-500/20"
+                    >
+                      إزالة الصورة
+                    </button>
+                  </div>
+                )}
+
+                <div>
+                  <label className="block text-sm text-slate-400 mb-2">النص البديل للختم</label>
+                  <input
+                    type="text"
+                    value={pdfStampText}
+                    onChange={(e) => updateBusinessSetting('pdf_stamp_text', e.target.value, setPdfStampText)}
+                    className="w-full bg-slate-950 border border-slate-600 rounded-xl px-4 py-3 text-white placeholder-slate-500 focus:border-emerald-500 focus:outline-none transition-colors"
+                    placeholder="مثال: معتمد - اقساطي"
+                  />
+                  <p className="text-[11px] text-slate-500 mt-2">يظهر هذا النص إذا لم يتم رفع صورة، أو كبديل عند تعذر تحميلها.</p>
+                </div>
+              </div>
+            )}
           </div>
         </div>
       </div>
@@ -963,7 +1057,7 @@ const Settings = ({ onSettingsChange, onLicenseRenewed, currentUser, onLogout, i
       </div>
 
       <div className="text-center text-slate-500 text-sm pt-4">
-        <p>نظام فزعتك (fazatak) - مزامنة سحابية آمنة ومشفرة</p>
+         <p>نظام اقساطي - مزامنة سحابية آمنة ومشفرة</p>
       </div>
 
       {/* ── نافذة اختيار نسخة Google Drive للاسترجاع ── */}
