@@ -344,6 +344,12 @@ input:focus, textarea:focus, select:focus {
   margin-top: 3px;
 }
 
+.premium-dashboard .customer-name {
+  overflow-wrap: anywhere;
+  white-space: normal;
+  line-height: 1.55;
+}
+
 .premium-dashboard .premium-alerts-panel {
   border-color: var(--fazatak-line);
   background: linear-gradient(145deg, rgba(35, 57, 69, 0.96), rgba(19, 31, 42, 0.96));
