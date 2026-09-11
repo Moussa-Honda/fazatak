@@ -41,10 +41,13 @@ const loadSettings = async () => {
       stampEnabled:    (await settingsService.get('pdf_stamp_enabled'))    === 'true',
       stampImage:      (await settingsService.get('pdf_stamp_image'))      || '',
       stampText:       (await settingsService.get('pdf_stamp_text'))       || '',
+      signatureEnabled: (await settingsService.get('pdf_signature_enabled')) === 'true',
+      signatureImage:   (await settingsService.get('pdf_signature_image'))   || '',
+      signatureText:    (await settingsService.get('pdf_signature_text'))    || '',
       ibanNumber:      (await settingsService.get('iban_number'))         || '',
     };
   } catch {
-    return { businessName:'', businessContact:'', taxNumber:'', showDetails:false, stampEnabled:false, stampImage:'', stampText:'', ibanNumber:'' };
+    return { businessName:'', businessContact:'', taxNumber:'', showDetails:false, stampEnabled:false, stampImage:'', stampText:'', signatureEnabled:false, signatureImage:'', signatureText:'', ibanNumber:'' };
   }
 };
 
@@ -93,6 +96,9 @@ const BASE_CSS = `
   .pdf-stamp-label { font-size:10px; color:#64748b !important; margin-bottom:5px; }
   .pdf-stamp img { display:block; width:92px; height:48px; object-fit:contain; margin:0 auto; }
   .pdf-stamp-text { display:inline-block; max-width:110px; border:1.5px solid #0f766e; border-radius:999px; padding:8px 11px; color:#0f766e !important; font-size:11px; font-weight:bold; transform:rotate(-5deg); }
+  .pdf-signature { min-width:125px; text-align:center; color:#334155 !important; }
+  .pdf-signature img { display:block; width:120px; height:50px; object-fit:contain; margin:2px auto 0; }
+  .pdf-signature-text { display:inline-block; max-width:120px; color:#334155 !important; font-size:12px; font-weight:bold; margin-top:10px; }
   .strip { background:#1e293b; color:#ffffff !important; text-align:center; padding:10px; font-size:13px; margin-top:14px; }
   /* Receipt */
   .receipt-amt-label { text-align:center; font-size:13px; padding:10px 0 6px; color:#0f172a !important; }
@@ -141,12 +147,20 @@ const escapeHTML = (value) => String(value || '').replace(/[&<>"']/g, (char) => 
 const pdfStampHTML = (s) => {
   if (!s.stampEnabled) return '';
   const text = escapeHTML(s.stampText || s.businessName || 'معتمد');
-  return `<div class="pdf-stamp"><div class="pdf-stamp-label">الختم / التوقيع</div>${s.stampImage ? `<img src="${s.stampImage}" alt="" />` : `<div class="pdf-stamp-text">${text}</div>`}</div>`;
+  return `<div class="pdf-stamp"><div class="pdf-stamp-label">الختم</div>${s.stampImage ? `<img src="${s.stampImage}" alt="" />` : `<div class="pdf-stamp-text">${text}</div>`}</div>`;
+};
+
+const pdfSignatureHTML = (s) => {
+  if (!s.signatureEnabled) return '<div class="sig-line"></div>';
+  const text = escapeHTML(s.signatureText || s.businessName || 'توقيع الإدارة');
+  return s.signatureImage
+    ? `<img src="${s.signatureImage}" alt="" />`
+    : `<div class="pdf-signature-text">${text}</div>`;
 };
 
 const footerHTML = (s) => `
 <div class="footer">
-  <div><div>توقيع الإدارة</div><div class="sig-line"></div></div>
+  <div class="pdf-signature"><div>توقيع الإدارة</div>${pdfSignatureHTML(s)}</div>
   ${pdfStampHTML(s)}
   <div style="text-align:left"><div>معلومات الدفع</div>${s.ibanNumber ? `<div class="iban">IBAN: ${s.ibanNumber}</div>` : ''}</div>
 </div>
@@ -352,11 +366,12 @@ const buildReceiptHTML = (customer, installment, contract, s, managedBy = null) 
       <div class="detail-row"><span class="detail-label">تاريخ السداد</span><span style="font-family:Arial,sans-serif; direction:ltr; color:#0f172a;">${fmtDate(installment.paid_at) || today()}</span></div>
       <div class="detail-row"><span class="detail-label">المبلغ المسدد</span><span class="green" style="font-weight:bold;">${fmt(amt)} ر.س</span></div>
     </div>
-     <div class="sigs">
-       <div class="sig-block"><div>توقيع المستلم</div><div class="sig-line" style="margin:auto;margin-top:16px"></div></div>
-       <div class="sig-block"><div>توقيع العميل</div><div class="sig-line" style="margin:auto;margin-top:16px"></div></div>
-     </div>
-     ${pdfStampHTML(s)}
+      <div class="sigs">
+        <div class="sig-block"><div>توقيع المستلم</div><div class="sig-line" style="margin:auto;margin-top:16px"></div></div>
+        <div class="sig-block"><div>توقيع العميل</div><div class="sig-line" style="margin:auto;margin-top:16px"></div></div>
+      </div>
+      ${s.signatureEnabled ? `<div style="margin:14px 24px 0; text-align:center">${pdfSignatureHTML(s)}</div>` : ''}
+      ${pdfStampHTML(s)}
      ${s.ibanNumber ? `<div style="text-align:center;font-size:10px;color:#334155;margin-top:10px;direction:ltr">IBAN: ${s.ibanNumber}</div>` : ''}
     <div class="strip">شكراً لتعاملكم معنا</div>`);
 };
