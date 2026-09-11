@@ -39,6 +39,47 @@ const ToggleItem = ({ title, description, value, onToggle, icon }) => (
   </div>
 );
 
+const PdfMarkEditor = ({ label, image, text, error, onFileChange, onClear, onTextChange }) => (
+  <div className="space-y-3 rounded-xl border border-slate-700 bg-slate-900/60 p-4">
+    <div>
+      <label className="block text-sm text-slate-400 mb-2">صورة {label}</label>
+      <input
+        type="file"
+        accept="image/png,image/jpeg,image/webp"
+        onChange={onFileChange}
+        className="w-full text-xs text-slate-400 file:mr-3 file:rounded-lg file:border-0 file:bg-emerald-600 file:px-3 file:py-2 file:font-bold file:text-white hover:file:bg-emerald-500"
+      />
+      <p className="text-[11px] text-slate-500 mt-2">PNG شفاف أو JPG أو WebP، بحد أقصى 2 ميجابايت.</p>
+      {error && <p className="text-xs text-rose-300 mt-2">{error}</p>}
+    </div>
+
+    {image && (
+      <div className="flex items-center justify-between gap-3 rounded-lg border border-slate-700 bg-slate-950 p-3">
+        <img src={image} alt={`معاينة ${label}`} className="h-16 max-w-40 object-contain" />
+        <button
+          type="button"
+          onClick={onClear}
+          className="rounded-lg bg-rose-500/10 px-3 py-2 text-xs font-bold text-rose-300 hover:bg-rose-500/20"
+        >
+          إزالة الصورة
+        </button>
+      </div>
+    )}
+
+    <div>
+      <label className="block text-sm text-slate-400 mb-2">النص البديل لـ{label}</label>
+      <input
+        type="text"
+        value={text}
+        onChange={onTextChange}
+        className="w-full bg-slate-950 border border-slate-600 rounded-xl px-4 py-3 text-white placeholder-slate-500 focus:border-emerald-500 focus:outline-none transition-colors"
+        placeholder={`مثال: ${label === 'الختم' ? 'معتمد - أقساطي' : 'اسم صاحب التوقيع'}`}
+      />
+      <p className="text-[11px] text-slate-500 mt-2">يظهر النص إذا لم يتم رفع صورة.</p>
+    </div>
+  </div>
+);
+
 const Settings = ({ onSettingsChange, onLicenseRenewed, currentUser, onLogout, isReadOnly = false, onRenewalRequest }) => {
   const [passwordForm, setPasswordForm] = useState({ current: '', next: '', confirm: '' });
   const [passwordLoading, setPasswordLoading] = useState(false);
@@ -81,7 +122,7 @@ const Settings = ({ onSettingsChange, onLicenseRenewed, currentUser, onLogout, i
     try {
       const backups = await googleDriveService.listBackups(15);
       if (!backups || backups.length === 0) {
-        setDriveError('لا توجد نسخ احتياطية لتطبيق اقساطي على حساب Google Drive هذا.');
+        setDriveError('لا توجد نسخ احتياطية لتطبيق أقساطي على حساب Google Drive هذا.');
         return;
       }
       setDriveBackups(backups);
@@ -162,6 +203,10 @@ const Settings = ({ onSettingsChange, onLicenseRenewed, currentUser, onLogout, i
   const [pdfStampImage, setPdfStampImage] = useState('');
   const [pdfStampText, setPdfStampText] = useState('');
   const [pdfStampError, setPdfStampError] = useState('');
+  const [pdfSignatureEnabled, setPdfSignatureEnabled] = useState(false);
+  const [pdfSignatureImage, setPdfSignatureImage] = useState('');
+  const [pdfSignatureText, setPdfSignatureText] = useState('');
+  const [pdfSignatureError, setPdfSignatureError] = useState('');
   const [deviceId, setDeviceId] = useState('');
   const [licenseExpiry, setLicenseExpiry] = useState(null);
   const [renewalCode, setRenewalCode] = useState('');
@@ -173,7 +218,7 @@ const Settings = ({ onSettingsChange, onLicenseRenewed, currentUser, onLogout, i
     try {
       const [
         quick, privacy, screenPrivacyValue,
-        bizName, bizContact, taxNo, showPdf, stampEnabled, stampImage, stampText, overThreshold, stagThreshold,
+        bizName, bizContact, taxNo, showPdf, stampEnabled, stampImage, stampText, signatureEnabled, signatureImage, signatureText, overThreshold, stagThreshold,
         notifEnabled, notifDays, notifTime, notifOverdue, whatsappText,
          showCustody, showTicker
       ] = await Promise.all([
@@ -187,6 +232,9 @@ const Settings = ({ onSettingsChange, onLicenseRenewed, currentUser, onLogout, i
         settingsService.get('pdf_stamp_enabled'),
         settingsService.get('pdf_stamp_image'),
         settingsService.get('pdf_stamp_text'),
+        settingsService.get('pdf_signature_enabled'),
+        settingsService.get('pdf_signature_image'),
+        settingsService.get('pdf_signature_text'),
         settingsService.get('overdue_threshold_days'),
         settingsService.get('stagnancy_threshold_days'),
         settingsService.get('installment_notifications_enabled'),
@@ -210,6 +258,9 @@ const Settings = ({ onSettingsChange, onLicenseRenewed, currentUser, onLogout, i
       setPdfStampEnabled(stampEnabled === 'true');
       setPdfStampImage(stampImage || '');
       setPdfStampText(stampText || '');
+      setPdfSignatureEnabled(signatureEnabled === 'true');
+      setPdfSignatureImage(signatureImage || '');
+      setPdfSignatureText(signatureText || '');
       setOverdueThreshold(parseInt(overThreshold) || 30);
       setStagnancyThreshold(parseInt(stagThreshold) || 90);
       setNotificationsEnabled(notifEnabled === 'true');
@@ -264,7 +315,7 @@ const Settings = ({ onSettingsChange, onLicenseRenewed, currentUser, onLogout, i
   };
 
   const handleSupportWhatsApp = () => {
-    const message = `السلام عليكم، أريد تجديد اشتراك تطبيق اقساطي. رقم الجهاز: ${deviceId || ''}`;
+    const message = `السلام عليكم، أريد تجديد اشتراك تطبيق أقساطي. رقم الجهاز: ${deviceId || ''}`;
     window.open(`https://wa.me/${SUPPORT_WHATSAPP_PHONE}?text=${encodeURIComponent(message)}`, '_blank');
   };
 
@@ -467,36 +518,37 @@ const Settings = ({ onSettingsChange, onLicenseRenewed, currentUser, onLogout, i
     onSettingsChange?.();
   };
 
-  const handlePdfStampImageChange = (event) => {
+  const handlePdfMarkImageChange = (event, settingKey, setImage, setError) => {
     const file = event.target.files?.[0];
     event.target.value = '';
     if (!file) return;
 
     if (!file.type.startsWith('image/')) {
-      setPdfStampError('يرجى اختيار صورة للختم أو التوقيع.');
+      setError('يرجى اختيار صورة صحيحة.');
       return;
     }
 
     if (file.size > 2 * 1024 * 1024) {
-      setPdfStampError('حجم صورة الختم أو التوقيع يجب ألا يتجاوز 2 ميجابايت.');
+      setError('حجم الصورة يجب ألا يتجاوز 2 ميجابايت.');
       return;
     }
 
     const reader = new FileReader();
     reader.onload = async () => {
       const dataUrl = String(reader.result || '');
-      setPdfStampImage(dataUrl);
-      setPdfStampError('');
-      await settingsService.set('pdf_stamp_image', dataUrl);
+      setImage(dataUrl);
+      setError('');
+      await settingsService.set(settingKey, dataUrl);
       onSettingsChange?.();
     };
-    reader.onerror = () => setPdfStampError('تعذر قراءة صورة الختم أو التوقيع.');
+    reader.onerror = () => setError('تعذر قراءة الصورة.');
     reader.readAsDataURL(file);
   };
 
-  const clearPdfStampImage = async () => {
-    setPdfStampImage('');
-    await settingsService.set('pdf_stamp_image', '');
+  const clearPdfMarkImage = async (settingKey, setImage, setError) => {
+    setImage('');
+    setError('');
+    await settingsService.set(settingKey, '');
     onSettingsChange?.();
   };
 
@@ -562,7 +614,7 @@ const Settings = ({ onSettingsChange, onLicenseRenewed, currentUser, onLogout, i
                 <button
                   type="button"
                   onClick={() => {
-                    const message = `السلام عليكم، أريد تجديد اشتراك تطبيق اقساطي لرقم الحساب: ${currentUser?.phone || ''}`;
+                    const message = `السلام عليكم، أريد تجديد اشتراك تطبيق أقساطي لرقم الحساب: ${currentUser?.phone || ''}`;
                     window.open(`https://wa.me/${SUPPORT_WHATSAPP_PHONE}?text=${encodeURIComponent(message)}`, '_blank');
                   }}
                   className="px-3.5 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl font-bold text-xs shadow transition-all active:scale-95 cursor-pointer flex items-center gap-1"
@@ -705,7 +757,7 @@ const Settings = ({ onSettingsChange, onLicenseRenewed, currentUser, onLogout, i
         <ToggleItem title="حماية الشاشة" description="منع لقطات الشاشة وتسجيل الفيديو" value={screenPrivacy} onToggle={() => toggleSetting('screen_privacy', screenPrivacy, setScreenPrivacy)} icon="📸" />
         <ToggleItem title="التاريخ الهجري" description="عرض التاريخ الهجري" value={hijriCalendar} onToggle={() => toggleSetting('hijri_calendar', hijriCalendar, setHijriCalendar)} icon="📅" />
         <ToggleItem title="قسم العهد" description="إظهار قسم العهد في الشريط السفلي" value={showCustodySection} onToggle={() => toggleSetting('show_custody_section', showCustodySection, setShowCustodySection)} icon="💼" />
-         <ToggleItem title="الرسائل التحفيزية" description="عرض آية أو ذكر أو عبارة تشجيعية بجانب شعار اقساطي" value={showMotivationalTicker} onToggle={() => toggleSetting('show_motivational_ticker', showMotivationalTicker, setShowMotivationalTicker)} icon="✨" />
+         <ToggleItem title="الرسائل التحفيزية" description="عرض آية أو ذكر أو عبارة تشجيعية بجانب شعار أقساطي" value={showMotivationalTicker} onToggle={() => toggleSetting('show_motivational_ticker', showMotivationalTicker, setShowMotivationalTicker)} icon="✨" />
       </div>
 
       {/* Account Security Section */}
@@ -854,7 +906,7 @@ const Settings = ({ onSettingsChange, onLicenseRenewed, currentUser, onLogout, i
               value={businessName}
               onChange={(e) => updateBusinessSetting('business_name', e.target.value, setBusinessName)}
               className="w-full bg-slate-900 border border-slate-600 rounded-xl px-4 py-3 text-white placeholder-slate-500 focus:border-blue-500 focus:outline-none transition-colors"
-               placeholder="مثال: مؤسسة اقساطي للتقسيط"
+                placeholder="مثال: مؤسسة أقساطي للتقسيط"
             />
           </div>
 
@@ -882,54 +934,45 @@ const Settings = ({ onSettingsChange, onLicenseRenewed, currentUser, onLogout, i
             />
           </div>
 
-          <div className="pt-4 border-t border-slate-700/50 space-y-4">
-            <ToggleItem
-              title="إظهار الختم أو التوقيع في PDF"
-              description="إضافة صورة الختم أو التوقيع إلى أسفل كل كشف أو إيصال"
+           <div className="pt-4 border-t border-slate-700/50 space-y-4">
+             <ToggleItem
+              title="إظهار الختم في PDF"
+              description="إضافة صورة الختم إلى أسفل كل كشف أو إيصال"
               value={pdfStampEnabled}
               onToggle={() => toggleSetting('pdf_stamp_enabled', pdfStampEnabled, setPdfStampEnabled)}
-              icon="🖋️"
+              icon="🔖"
             />
 
             {pdfStampEnabled && (
-              <div className="space-y-3 rounded-xl border border-slate-700 bg-slate-900/60 p-4">
-                <div>
-                  <label className="block text-sm text-slate-400 mb-2">صورة الختم أو التوقيع</label>
-                  <input
-                    type="file"
-                    accept="image/png,image/jpeg,image/webp"
-                    onChange={handlePdfStampImageChange}
-                    className="w-full text-xs text-slate-400 file:mr-3 file:rounded-lg file:border-0 file:bg-emerald-600 file:px-3 file:py-2 file:font-bold file:text-white hover:file:bg-emerald-500"
-                  />
-                  <p className="text-[11px] text-slate-500 mt-2">PNG شفاف أو JPG أو WebP، بحد أقصى 2 ميجابايت.</p>
-                  {pdfStampError && <p className="text-xs text-rose-300 mt-2">{pdfStampError}</p>}
-                </div>
+              <PdfMarkEditor
+                label="الختم"
+                image={pdfStampImage}
+                text={pdfStampText}
+                error={pdfStampError}
+                onFileChange={(event) => handlePdfMarkImageChange(event, 'pdf_stamp_image', setPdfStampImage, setPdfStampError)}
+                onClear={() => clearPdfMarkImage('pdf_stamp_image', setPdfStampImage, setPdfStampError)}
+                onTextChange={(event) => updateBusinessSetting('pdf_stamp_text', event.target.value, setPdfStampText)}
+              />
+            )}
 
-                {pdfStampImage && (
-                  <div className="flex items-center justify-between gap-3 rounded-lg border border-slate-700 bg-slate-950 p-3">
-                    <img src={pdfStampImage} alt="معاينة الختم أو التوقيع" className="h-16 max-w-40 object-contain" />
-                    <button
-                      type="button"
-                      onClick={clearPdfStampImage}
-                      className="rounded-lg bg-rose-500/10 px-3 py-2 text-xs font-bold text-rose-300 hover:bg-rose-500/20"
-                    >
-                      إزالة الصورة
-                    </button>
-                  </div>
-                )}
+            <ToggleItem
+              title="إظهار التوقيع في PDF"
+              description="إضافة صورة التوقيع إلى خانة توقيع الإدارة"
+              value={pdfSignatureEnabled}
+              onToggle={() => toggleSetting('pdf_signature_enabled', pdfSignatureEnabled, setPdfSignatureEnabled)}
+              icon="🖋️"
+            />
 
-                <div>
-                  <label className="block text-sm text-slate-400 mb-2">النص البديل للختم</label>
-                  <input
-                    type="text"
-                    value={pdfStampText}
-                    onChange={(e) => updateBusinessSetting('pdf_stamp_text', e.target.value, setPdfStampText)}
-                    className="w-full bg-slate-950 border border-slate-600 rounded-xl px-4 py-3 text-white placeholder-slate-500 focus:border-emerald-500 focus:outline-none transition-colors"
-                    placeholder="مثال: معتمد - اقساطي"
-                  />
-                  <p className="text-[11px] text-slate-500 mt-2">يظهر هذا النص إذا لم يتم رفع صورة، أو كبديل عند تعذر تحميلها.</p>
-                </div>
-              </div>
+            {pdfSignatureEnabled && (
+              <PdfMarkEditor
+                label="التوقيع"
+                image={pdfSignatureImage}
+                text={pdfSignatureText}
+                error={pdfSignatureError}
+                onFileChange={(event) => handlePdfMarkImageChange(event, 'pdf_signature_image', setPdfSignatureImage, setPdfSignatureError)}
+                onClear={() => clearPdfMarkImage('pdf_signature_image', setPdfSignatureImage, setPdfSignatureError)}
+                onTextChange={(event) => updateBusinessSetting('pdf_signature_text', event.target.value, setPdfSignatureText)}
+              />
             )}
           </div>
         </div>
@@ -1057,7 +1100,7 @@ const Settings = ({ onSettingsChange, onLicenseRenewed, currentUser, onLogout, i
       </div>
 
       <div className="text-center text-slate-500 text-sm pt-4">
-         <p>نظام اقساطي - مزامنة سحابية آمنة ومشفرة</p>
+         <p>نظام أقساطي - مزامنة سحابية آمنة ومشفرة</p>
       </div>
 
       {/* ── نافذة اختيار نسخة Google Drive للاسترجاع ── */}
