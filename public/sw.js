@@ -3,7 +3,7 @@
 // استراتيجية: Cache First للـ assets + Offline fallback للـ navigation
 // ============================================================
 
-const CACHE_VERSION = 'v2.3.0';
+const CACHE_VERSION = 'v2.4.0';
 const CACHE_NAME = `fazatak-cache-${CACHE_VERSION}`;
 const OFFLINE_PAGE = '/index.html';
 
@@ -13,6 +13,7 @@ const STATIC_ASSETS = [
   '/index.html',
   '/manifest.webmanifest',
   '/manifest.json',
+  '/logo-mark.svg',
   '/favicon.svg',
   '/icons.svg',
   '/icons/apple-touch-icon.png',
