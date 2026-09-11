@@ -38,9 +38,14 @@ const loadSettings = async () => {
       businessContact: (await settingsService.get('business_contact'))   || '',
       taxNumber:       (await settingsService.get('tax_number'))          || '',
       showDetails:     (await settingsService.get('show_details_on_pdf')) === 'true',
+      stampEnabled:    (await settingsService.get('pdf_stamp_enabled'))    === 'true',
+      stampImage:      (await settingsService.get('pdf_stamp_image'))      || '',
+      stampText:       (await settingsService.get('pdf_stamp_text'))       || '',
       ibanNumber:      (await settingsService.get('iban_number'))         || '',
     };
-  } catch { return { businessName:'', businessContact:'', taxNumber:'', showDetails:false, ibanNumber:'' }; }
+  } catch {
+    return { businessName:'', businessContact:'', taxNumber:'', showDetails:false, stampEnabled:false, stampImage:'', stampText:'', ibanNumber:'' };
+  }
 };
 
 // ─── Shared CSS ───────────────────────────────────────────────────────────────
@@ -84,6 +89,10 @@ const BASE_CSS = `
   .footer { display:flex; justify-content:space-between; padding:12px 24px 0; border-top:1px solid #cbd5e1; margin:18px 24px 0; color:#334155 !important; }
   .iban  { font-size:11px; color:#334155 !important; margin-top:4px; direction:ltr; text-align:right; font-weight:bold; }
   .sig-line { border-top:1px solid #94a3b8; width:120px; margin-top:16px; }
+  .pdf-stamp { min-width:115px; text-align:center; color:#334155 !important; }
+  .pdf-stamp-label { font-size:10px; color:#64748b !important; margin-bottom:5px; }
+  .pdf-stamp img { display:block; width:92px; height:48px; object-fit:contain; margin:0 auto; }
+  .pdf-stamp-text { display:inline-block; max-width:110px; border:1.5px solid #0f766e; border-radius:999px; padding:8px 11px; color:#0f766e !important; font-size:11px; font-weight:bold; transform:rotate(-5deg); }
   .strip { background:#1e293b; color:#ffffff !important; text-align:center; padding:10px; font-size:13px; margin-top:14px; }
   /* Receipt */
   .receipt-amt-label { text-align:center; font-size:13px; padding:10px 0 6px; color:#0f172a !important; }
@@ -127,10 +136,19 @@ const headerHTML = (title, sub, s, managedBy = null) => `
   <div class="co">${businessDetailsHTML(s)}</div>
 </div>`;
 
-const footerHTML = (iban) => `
+const escapeHTML = (value) => String(value || '').replace(/[&<>"']/g, (char) => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[char]));
+
+const pdfStampHTML = (s) => {
+  if (!s.stampEnabled) return '';
+  const text = escapeHTML(s.stampText || s.businessName || 'معتمد');
+  return `<div class="pdf-stamp"><div class="pdf-stamp-label">الختم / التوقيع</div>${s.stampImage ? `<img src="${s.stampImage}" alt="" />` : `<div class="pdf-stamp-text">${text}</div>`}</div>`;
+};
+
+const footerHTML = (s) => `
 <div class="footer">
   <div><div>توقيع الإدارة</div><div class="sig-line"></div></div>
-  <div style="text-align:left"><div>معلومات الدفع</div>${iban ? `<div class="iban">IBAN: ${iban}</div>` : ''}</div>
+  ${pdfStampHTML(s)}
+  <div style="text-align:left"><div>معلومات الدفع</div>${s.ibanNumber ? `<div class="iban">IBAN: ${s.ibanNumber}</div>` : ''}</div>
 </div>
 <div class="strip">شكراً لتعاملكم معنا</div>`;
 
@@ -176,7 +194,7 @@ const buildGlobalHTML = async (customer, contracts, s, managedBy = null) => {
     <table><thead><tr><th>اسم العقد</th><th>إجمالي العقد</th><th>المدفوع</th><th>المتبقي</th></tr></thead>
     <tbody>${rows || '<tr><td colspan="4" style="padding:16px; color:#64748b;">لا توجد عقود</td></tr>'}</tbody></table>
     ${totalsHTML(grandTotal, grandPaid, grandRemain)}
-    ${footerHTML(s.ibanNumber)}`);
+     ${footerHTML(s)}`);
 };
 
 // ─── Mode 2: Contract Detail ──────────────────────────────────────────────────
@@ -315,7 +333,7 @@ const buildContractHTML = async (customer, contract, s, managedBy = null, passed
       </tbody>
     </table>
     ${totalsHTML(total, paid, remain)}
-    ${footerHTML(s.ibanNumber)}
+     ${footerHTML(s)}
   `);
 };
 
@@ -334,11 +352,12 @@ const buildReceiptHTML = (customer, installment, contract, s, managedBy = null) 
       <div class="detail-row"><span class="detail-label">تاريخ السداد</span><span style="font-family:Arial,sans-serif; direction:ltr; color:#0f172a;">${fmtDate(installment.paid_at) || today()}</span></div>
       <div class="detail-row"><span class="detail-label">المبلغ المسدد</span><span class="green" style="font-weight:bold;">${fmt(amt)} ر.س</span></div>
     </div>
-    <div class="sigs">
-      <div class="sig-block"><div>توقيع المستلم</div><div class="sig-line" style="margin:auto;margin-top:16px"></div></div>
-      <div class="sig-block"><div>توقيع العميل</div><div class="sig-line" style="margin:auto;margin-top:16px"></div></div>
-    </div>
-    ${s.ibanNumber ? `<div style="text-align:center;font-size:10px;color:#334155;margin-top:10px;direction:ltr">IBAN: ${s.ibanNumber}</div>` : ''}
+     <div class="sigs">
+       <div class="sig-block"><div>توقيع المستلم</div><div class="sig-line" style="margin:auto;margin-top:16px"></div></div>
+       <div class="sig-block"><div>توقيع العميل</div><div class="sig-line" style="margin:auto;margin-top:16px"></div></div>
+     </div>
+     ${pdfStampHTML(s)}
+     ${s.ibanNumber ? `<div style="text-align:center;font-size:10px;color:#334155;margin-top:10px;direction:ltr">IBAN: ${s.ibanNumber}</div>` : ''}
     <div class="strip">شكراً لتعاملكم معنا</div>`);
 };
 
@@ -390,7 +409,7 @@ const buildCustodyHTML = (custody, expenses, s) => {
         ${rows || '<tr><td colspan="3" style="text-align:center; padding:20px; color:#64748b">لا توجد مصروفات مسجلة</td></tr>'}
       </tbody>
     </table>
-    ${footerHTML(s.ibanNumber)}
+     ${footerHTML(s)}
   `);
 };
 
