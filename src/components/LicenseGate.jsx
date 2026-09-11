@@ -28,7 +28,7 @@ const LicenseGate = ({ onActivated, isModal = false }) => {
   };
 
   const handleSupportWhatsApp = () => {
-    const message = `السلام عليكم، أريد تجديد اشتراك تطبيق فزعتك. رقم الجهاز: ${deviceId || ''}`;
+    const message = `السلام عليكم، أريد تجديد اشتراك تطبيق اقساطي. رقم الجهاز: ${deviceId || ''}`;
     window.open(`https://wa.me/${SUPPORT_WHATSAPP_PHONE}?text=${encodeURIComponent(message)}`, '_blank');
   };
 
@@ -145,7 +145,7 @@ const LicenseGate = ({ onActivated, isModal = false }) => {
 
         {/* Footer */}
         <div className="bg-slate-950/50 p-4 text-center border-t border-slate-800">
-          <p className="text-[10px] text-slate-600">نظام حماية فزعتك للأقساط والديون © 2026</p>
+           <p className="text-[10px] text-slate-600">نظام حماية اقساطي للأقساط والديون © 2026</p>
         </div>
       </div>
     </div>
