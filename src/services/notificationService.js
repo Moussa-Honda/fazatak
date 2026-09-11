@@ -1,6 +1,7 @@
 import { Capacitor } from '@capacitor/core';
 import { LocalNotifications } from '@capacitor/local-notifications';
 import { getDatabase, settingsService } from './database';
+import { webPushService } from './webPushService';
 
 const CHANNEL_ID = 'installment-reminders';
 const NOTIFICATION_ID_BASE = 1100000000;
@@ -102,7 +103,7 @@ const getSettings = async () => {
 
 const ensurePermission = async (requestPermission = false) => {
   if (!Capacitor.isNativePlatform()) {
-    return { granted: false, reason: 'unsupported' };
+    return webPushService.ensureSubscription({ requestPermission });
   }
 
   let status = await LocalNotifications.checkPermissions();
@@ -134,8 +135,11 @@ const ensureChannel = async () => {
   });
 };
 
-const cancelInstallmentNotifications = async () => {
-  if (!Capacitor.isNativePlatform()) return 0;
+const cancelInstallmentNotifications = async ({ removeWebSubscription = false } = {}) => {
+  if (!Capacitor.isNativePlatform()) {
+    if (removeWebSubscription) await webPushService.unsubscribe();
+    return 0;
+  }
 
   const pending = await LocalNotifications.getPending();
   const ours = (pending.notifications || []).filter(isOurNotification);
@@ -307,7 +311,7 @@ export const notificationService = {
     const settings = await getSettings();
 
     if (!settings.enabled) {
-      const cancelled = await cancelInstallmentNotifications();
+      const cancelled = await cancelInstallmentNotifications({ removeWebSubscription: true });
       return { enabled: false, scheduled: 0, cancelled };
     }
 
@@ -315,6 +319,10 @@ export const notificationService = {
     if (!permission.granted) {
       const cancelled = await cancelInstallmentNotifications();
       return { enabled: true, scheduled: 0, cancelled, permission: permission.reason };
+    }
+
+    if (!Capacitor.isNativePlatform()) {
+      return { enabled: true, scheduled: 0, cancelled: 0, permission: 'granted', webPush: true };
     }
 
     await ensureChannel();
@@ -332,7 +340,7 @@ export const notificationService = {
   async setEnabled(enabled) {
     if (!enabled) {
       await settingsService.set('installment_notifications_enabled', 'false');
-      await cancelInstallmentNotifications();
+      await cancelInstallmentNotifications({ removeWebSubscription: true });
       return { enabled: false, scheduled: 0 };
     }
 
@@ -341,7 +349,7 @@ export const notificationService = {
 
     if (result.permission && result.permission !== 'granted') {
       await settingsService.set('installment_notifications_enabled', 'false');
-      await cancelInstallmentNotifications();
+      await cancelInstallmentNotifications({ removeWebSubscription: true });
       return { ...result, enabled: false };
     }
 
@@ -354,6 +362,10 @@ export const notificationService = {
   },
 
   async sendTestNotification() {
+    if (!Capacitor.isNativePlatform()) {
+      return webPushService.sendTestNotification();
+    }
+
     const permission = await ensurePermission(true);
     if (!permission.granted) {
       return { sent: false, permission: permission.reason };
