@@ -36,6 +36,20 @@ const isInstallmentPostponedForDisplay = (installment) => {
   return status === 'postponed' && !isInstallmentPaidForDisplay(installment);
 };
 
+const getLocalDateText = (date = new Date()) => {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
+
+const isInstallmentLateForDisplay = (installment) => {
+  const status = String(installment?.status || '').trim().toLowerCase();
+  return status === 'pending'
+    && !isInstallmentPaidForDisplay(installment)
+    && String(installment?.due_date || '') < getLocalDateText();
+};
+
 const getInstallmentStatusGroup = (installment) => {
   if (isInstallmentPaidForDisplay(installment)) return 'paid';
   if (isInstallmentPostponedForDisplay(installment)) return 'postponed';
@@ -451,6 +465,7 @@ const ContractList = ({ customerId, isReadOnly, onRenewalRequest, themeColor = '
     if (status === 'postponed') return 'مؤجل';
     if (inst) {
       const paidAmount = getInstallmentPaidAmount(inst);
+      if (isInstallmentLateForDisplay(inst)) return paidAmount > 0 ? 'متأخر جزئياً' : 'متأخر';
       if (paidAmount > 0) return 'دفع جزئي';
     }
     return 'معلق';
