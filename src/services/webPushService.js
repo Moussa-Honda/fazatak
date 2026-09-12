@@ -2,6 +2,7 @@ import { Capacitor } from '@capacitor/core';
 import { authService } from './authService';
 
 const SUBSCRIPTION_STORAGE_KEY = 'fazatak_web_push_subscription';
+const VAPID_KEY_STORAGE_KEY = 'fazatak_web_push_vapid_key';
 
 const isSupported = () => (
   typeof window !== 'undefined' &&
@@ -31,6 +32,30 @@ const writeStoredSubscription = (subscription) => {
 const clearStoredSubscription = () => {
   try {
     localStorage.removeItem(SUBSCRIPTION_STORAGE_KEY);
+  } catch {
+    // Ignore storage cleanup failures.
+  }
+};
+
+const readStoredVapidKey = () => {
+  try {
+    return localStorage.getItem(VAPID_KEY_STORAGE_KEY) || '';
+  } catch {
+    return '';
+  }
+};
+
+const writeStoredVapidKey = (key) => {
+  try {
+    localStorage.setItem(VAPID_KEY_STORAGE_KEY, key);
+  } catch {
+    // The subscription remains valid even if storage is unavailable.
+  }
+};
+
+const clearStoredVapidKey = () => {
+  try {
+    localStorage.removeItem(VAPID_KEY_STORAGE_KEY);
   } catch {
     // Ignore storage cleanup failures.
   }
@@ -106,13 +131,13 @@ const saveSubscription = async (subscription) => {
       timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'Asia/Riyadh',
       subscription: serialized,
     }),
-  });
+    });
 
-  if (!response.ok) {
-    const error = new Error('push_registration_failed');
-    error.code = 'registration_failed';
-    throw error;
-  }
+    if (!response.ok) {
+      const error = new Error('push_registration_failed');
+      error.code = response.status === 503 ? 'push_service_unavailable' : 'registration_failed';
+      throw error;
+    }
 
   writeStoredSubscription(serialized);
   return serialized;
@@ -145,6 +170,14 @@ export const webPushService = {
       const registration = await getRegistration();
       let subscription = await registration.pushManager.getSubscription();
 
+      // Recreate subscriptions issued with an older VAPID key.
+      const savedVapidKey = readStoredVapidKey();
+      if (subscription && savedVapidKey !== config.vapidPublicKey) {
+        await subscription.unsubscribe();
+        clearStoredSubscription();
+        subscription = null;
+      }
+
       if (!subscription) {
         subscription = await registration.pushManager.subscribe({
           userVisibleOnly: true,
@@ -153,6 +186,7 @@ export const webPushService = {
       }
 
       const serialized = await saveSubscription(subscription);
+      writeStoredVapidKey(config.vapidPublicKey);
       return { granted: true, reason: 'granted', subscription: serialized };
     } catch (error) {
       console.warn('[WebPush] Subscription failed:', error);
@@ -178,6 +212,7 @@ export const webPushService = {
       console.warn('[WebPush] Unsubscribe failed:', error);
     } finally {
       clearStoredSubscription();
+      clearStoredVapidKey();
     }
     return true;
   },
