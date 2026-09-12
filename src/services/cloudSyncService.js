@@ -20,6 +20,30 @@ const DEVICE_NOTIFICATION_SETTING_KEYS = [
   'installment_overdue_notifications_enabled',
 ];
 
+const preserveDeviceNotificationSettings = async (cloudPayload) => {
+  if (!cloudPayload?.tables) return cloudPayload;
+
+  const database = await getDatabase();
+  const placeholders = DEVICE_NOTIFICATION_SETTING_KEYS.map(() => '?').join(', ');
+  const localSettings = await database.query(
+    `SELECT key, value FROM settings WHERE key IN (${placeholders})`,
+    DEVICE_NOTIFICATION_SETTING_KEYS
+  );
+  const cloudSettings = Array.isArray(cloudPayload.tables.settings)
+    ? cloudPayload.tables.settings.filter(
+      (row) => !DEVICE_NOTIFICATION_SETTING_KEYS.includes(row?.key)
+    )
+    : [];
+
+  return {
+    ...cloudPayload,
+    tables: {
+      ...cloudPayload.tables,
+      settings: [...cloudSettings, ...(localSettings.values || [])],
+    },
+  };
+};
+
 export const notifySyncStatus = (status, detail = {}) => {
   if (typeof window === 'undefined') return;
   window.dispatchEvent(new CustomEvent(SYNC_STATUS_EVENT, {
@@ -108,23 +132,7 @@ export const cloudSyncService = {
     if (!cloudPayload || !cloudPayload.tables) return;
 
     const database = await getDatabase();
-    const placeholders = DEVICE_NOTIFICATION_SETTING_KEYS.map(() => '?').join(', ');
-    const localNotificationSettings = await database.query(
-      `SELECT key, value FROM settings WHERE key IN (${placeholders})`,
-      DEVICE_NOTIFICATION_SETTING_KEYS
-    );
-    const cloudSettings = Array.isArray(cloudPayload.tables.settings)
-      ? cloudPayload.tables.settings.filter(
-        (row) => !DEVICE_NOTIFICATION_SETTING_KEYS.includes(row?.key)
-      )
-      : [];
-    const mergePayload = {
-      ...cloudPayload,
-      tables: {
-        ...cloudPayload.tables,
-        settings: [...cloudSettings, ...(localNotificationSettings.values || [])],
-      },
-    };
+    const mergePayload = await preserveDeviceNotificationSettings(cloudPayload);
 
     // إذا كانت القاعدة المحلية خالية من المعاملات، استخدم importData الشامل والموثوق فوراً
     const localPayload = await exportData();
@@ -426,7 +434,7 @@ export const cloudSyncService = {
     try {
       isImportingCloud = true;
       // استخدام importData الموثوق الذي يكتب جميع الجداول داخل Transaction واحدة مؤمنة
-      await importData(cloudRecord.backup_payload);
+      await importData(await preserveDeviceNotificationSettings(cloudRecord.backup_payload));
       await persistWebStore();
 
       localStorage.setItem(LAST_SYNC_KEY, cloudRecord.updated_at);
@@ -478,7 +486,7 @@ export const cloudSyncService = {
       if (cloudBusinessCount > 0) {
         if (isUserSwitch || localBusinessCount === 0 || cloudBusinessCount >= localBusinessCount) {
           console.log(`[FullSyncOnLogin] جاري استرجاع ${cloudBusinessCount} معاملة من السحابة للرقم: ${phone}`);
-          await importData(cloudRecord.backup_payload);
+          await importData(await preserveDeviceNotificationSettings(cloudRecord.backup_payload));
           await persistWebStore();
           localStorage.setItem(LAST_SYNC_KEY, cloudRecord.updated_at);
           localStorage.setItem(`fazatak_user_cache_${phone}`, JSON.stringify(cloudRecord.backup_payload));
@@ -510,7 +518,7 @@ export const cloudSyncService = {
 
       if (localBusinessCount === 0 && cachedBusinessCount > 0) {
         console.log(`[FullSyncOnLogin] استعادة من الكاش المحلي أوفلاين للرقم: ${phone}`);
-        await importData(cached);
+        await importData(await preserveDeviceNotificationSettings(cached));
         await persistWebStore();
         localStorage.setItem('fazatak_current_db_phone', phone);
         notifyDataChanged({ scope: 'all', action: 'cache-restore' });
