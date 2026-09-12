@@ -1651,8 +1651,6 @@ export const installmentService = {
       WHERE i.status = 'pending'
       AND c.status = 'active'
        AND (cu.is_deleted IS NULL OR cu.is_deleted = 0)
-       AND (cu.manager_id IS NULL OR cu.manager_id = 0 OR cu.manager_id = '')
-       AND (cu.deleted_manager_id IS NULL OR cu.deleted_manager_id = 0)
        AND (m.id IS NULL OR m.is_deleted IS NULL OR m.is_deleted = 0)
        AND (cu.is_manually_flagged_as_overdue IS NULL OR cu.is_manually_flagged_as_overdue = 0)
       AND NOT EXISTS (
