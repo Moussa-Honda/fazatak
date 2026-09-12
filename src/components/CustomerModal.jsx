@@ -18,8 +18,10 @@ const CustomerModal = ({ isOpen, onClose, onSave, customer = null, managerId = n
   });
   const [loading, setLoading] = useState(false);
   const [showContactPicker, setShowContactPicker] = useState(false);
+  const [errorMessage, setErrorMessage] = useState('');
 
   useEffect(() => {
+    setErrorMessage('');
     if (customer) {
       setFormData({
         name: customer.name || '',
@@ -35,6 +37,8 @@ const CustomerModal = ({ isOpen, onClose, onSave, customer = null, managerId = n
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    if (loading) return;
+    setErrorMessage('');
     setLoading(true);
     
     try {
@@ -58,6 +62,9 @@ const CustomerModal = ({ isOpen, onClose, onSave, customer = null, managerId = n
       onClose();
     } catch (error) {
       console.error('Error saving customer:', error);
+      const message = error?.message || 'حدث خطأ أثناء حفظ العميل';
+      setErrorMessage(message);
+      alert('تعذر حفظ العميل: ' + message);
     } finally {
       setLoading(false);
     }
