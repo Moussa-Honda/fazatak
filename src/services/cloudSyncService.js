@@ -12,6 +12,14 @@ let isSyncInProgress = false;
 let isImportingCloud = false;
 let autoSyncInitialized = false;
 
+// Notification permission and schedules belong to this device, not the cloud account.
+const DEVICE_NOTIFICATION_SETTING_KEYS = [
+  'installment_notifications_enabled',
+  'installment_notification_days_before',
+  'installment_notification_time',
+  'installment_overdue_notifications_enabled',
+];
+
 export const notifySyncStatus = (status, detail = {}) => {
   if (typeof window === 'undefined') return;
   window.dispatchEvent(new CustomEvent(SYNC_STATUS_EVENT, {
@@ -99,16 +107,35 @@ export const cloudSyncService = {
   async safeMergeCloudData(cloudPayload) {
     if (!cloudPayload || !cloudPayload.tables) return;
 
+    const database = await getDatabase();
+    const placeholders = DEVICE_NOTIFICATION_SETTING_KEYS.map(() => '?').join(', ');
+    const localNotificationSettings = await database.query(
+      `SELECT key, value FROM settings WHERE key IN (${placeholders})`,
+      DEVICE_NOTIFICATION_SETTING_KEYS
+    );
+    const cloudSettings = Array.isArray(cloudPayload.tables.settings)
+      ? cloudPayload.tables.settings.filter(
+        (row) => !DEVICE_NOTIFICATION_SETTING_KEYS.includes(row?.key)
+      )
+      : [];
+    const mergePayload = {
+      ...cloudPayload,
+      tables: {
+        ...cloudPayload.tables,
+        settings: [...cloudSettings, ...(localNotificationSettings.values || [])],
+      },
+    };
+
     // إذا كانت القاعدة المحلية خالية من المعاملات، استخدم importData الشامل والموثوق فوراً
     const localPayload = await exportData();
     const localBusinessCount = getBusinessRecordsCount(localPayload);
     if (localBusinessCount === 0) {
-      await importData(cloudPayload);
+      await importData(mergePayload);
       await persistWebStore();
       return;
     }
 
-    const db = await getDatabase();
+    const db = database;
     const tables = [
       'settings',
       'managers',
@@ -123,7 +150,7 @@ export const cloudSyncService = {
     ];
 
     for (const tableName of tables) {
-      const cloudRows = cloudPayload.tables[tableName];
+      const cloudRows = mergePayload.tables[tableName];
       if (!Array.isArray(cloudRows) || cloudRows.length === 0) continue;
 
       for (const row of cloudRows) {
@@ -507,3 +534,5 @@ export const cloudSyncService = {
     return this.fullSyncOnLogin(phone);
   }
 };
+
+      
