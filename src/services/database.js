@@ -557,10 +557,6 @@ export const getDatabase = async () => {
 export const customerService = {
   async create(customer) {
     const database = await getDatabase();
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    const todayText = formatLocalDate(today);
-    const horizonText = formatLocalDate(addLocalDays(today, Math.max(0, parseInt(days, 10) || 7)));
     const sql = `INSERT INTO customers (name, phone, is_blacklisted, is_vip, status, manager_id, is_manually_flagged_as_overdue) VALUES (?, ?, ?, ?, ?, ?, ?)`;
     const result = await database.run(sql, [
       customer.name, 
