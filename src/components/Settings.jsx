@@ -456,11 +456,11 @@ const Settings = ({ onSettingsChange, onLicenseRenewed, currentUser, onLogout, i
       } else if (result.permission === 'not_authenticated') {
         setNotificationStatus('يرجى تسجيل الدخول قبل تفعيل تنبيهات الجهاز.');
       } else if (result.permission === 'denied') {
-        setNotificationStatus('تم رفض صلاحية الإشعارات من إعدادات الجهاز.');
+        setNotificationStatus('تم رفض إشعارات أقساطي من النظام. افتح إعدادات الإشعارات للموقع في Chrome أو إعدادات إشعارات التطبيق في iPhone، اختر السماح، ثم عُد واضغط الزر مرة أخرى. لا يستطيع الموقع إظهار نافذة السماح تلقائياً بعد الرفض.');
       } else if (!result.enabled && notificationsEnabled) {
         setNotificationStatus('تم إيقاف تنبيهات الأقساط');
       } else if (!result.enabled) {
-        setNotificationStatus('لم يتم منح صلاحية الإشعارات من النظام');
+        setNotificationStatus('لم تُحسم صلاحية الإشعارات بعد. اضغط الزر مرة أخرى واسمح بها من نافذة النظام.');
       } else {
         setNotificationStatus(`تم تفعيل التنبيهات وجدولة ${result.scheduled || 0} إشعار`);
       }
@@ -495,7 +495,7 @@ const Settings = ({ onSettingsChange, onLicenseRenewed, currentUser, onLogout, i
         } else if (result.permission === 'not_configured') {
           setNotificationStatus('لم يتم إعداد خادم إشعارات Safari بعد.');
         } else if (result.permission === 'denied') {
-          setNotificationStatus('تم رفض صلاحية الإشعارات من إعدادات الجهاز.');
+          setNotificationStatus('تم رفض إشعارات أقساطي من النظام. افتح إعدادات الإشعارات للموقع أو التطبيق، اختر السماح، ثم عُد وأرسل الإشعار الاختباري مرة أخرى.');
         } else {
           setNotificationStatus('تعذر إرسال الإشعار الاختباري');
         }
@@ -1210,3 +1210,5 @@ const Settings = ({ onSettingsChange, onLicenseRenewed, currentUser, onLogout, i
 };
 
 export default Settings;
+
+  
