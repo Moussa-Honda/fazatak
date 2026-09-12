@@ -557,6 +557,10 @@ export const getDatabase = async () => {
 export const customerService = {
   async create(customer) {
     const database = await getDatabase();
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const todayText = formatLocalDate(today);
+    const horizonText = formatLocalDate(addLocalDays(today, Math.max(0, parseInt(days, 10) || 7)));
     const sql = `INSERT INTO customers (name, phone, is_blacklisted, is_vip, status, manager_id, is_manually_flagged_as_overdue) VALUES (?, ?, ?, ?, ?, ?, ?)`;
     const result = await database.run(sql, [
       customer.name, 
@@ -800,9 +804,8 @@ export const customerService = {
     );
 
     for (const row of overdue.values || []) {
-      if (statusMap[row.customer_id] === 'none') {
-        statusMap[row.customer_id] = 'overdue';
-      }
+      // A pending installment past its due date overrides a stale monthly label.
+      statusMap[row.customer_id] = 'overdue';
     }
 
     return statusMap;
@@ -1153,6 +1156,7 @@ export const contractService = {
 
     const database = await getDatabase();
     const days = Math.max(0, parseInt(overdueThreshold, 10) || 30);
+    const cutoffText = formatLocalDate(addLocalDays(new Date(), -days));
     const placeholders = ids.map(() => '?').join(',');
     const result = await database.query(
       `
@@ -1164,7 +1168,7 @@ export const contractService = {
         AND i.due_date < date('now', ?)
         AND c.customer_id IN (${placeholders})
       `,
-      [`-${days} days`, ...ids]
+      [cutoffText, ...ids]
     );
 
     return (result.values || []).reduce((map, row) => {
@@ -1173,6 +1177,31 @@ export const contractService = {
     }, {});
   },
 
+  async getLateCustomerMap(customerIds = []) {
+    const ids = [...new Set(customerIds.map(id => Number(id)).filter(Boolean))];
+    if (ids.length === 0) return {};
+
+    const database = await getDatabase();
+    const todayText = formatLocalDate(new Date());
+    const placeholders = ids.map(() => '?').join(',');
+    const result = await database.query(
+      `
+        SELECT DISTINCT c.customer_id
+        FROM contracts c
+        JOIN installments i ON i.contract_id = c.id
+        WHERE c.status = 'active'
+        AND i.status = 'pending'
+        AND i.due_date < ?
+        AND c.customer_id IN (${placeholders})
+      `,
+      [todayText, ...ids]
+    );
+
+    return (result.values || []).reduce((map, row) => {
+      map[row.customer_id] = true;
+      return map;
+    }, {});
+  },
   async getPostponedCustomerMap(customerIds = []) {
     const ids = [...new Set(customerIds.map(id => Number(id)).filter(Boolean))];
     if (ids.length === 0) return {};
@@ -1571,15 +1600,16 @@ export const installmentService = {
        AND (cu.manager_id IS NULL OR cu.manager_id = 0 OR cu.manager_id = '')
        AND (cu.deleted_manager_id IS NULL OR cu.deleted_manager_id = 0)
        AND (m.id IS NULL OR m.is_deleted IS NULL OR m.is_deleted = 0)
-       AND i.due_date BETWEEN date('now') AND date('now', '+${days} days')
+       AND i.due_date BETWEEN ? AND ?
       ORDER BY i.due_date ASC
     `;
-    const result = await database.query(sql);
+    const result = await database.query(sql, [todayText, horizonText]);
     return result.values || [];
   },
 
   async getOverdue() {
     const database = await getDatabase();
+    const todayText = formatLocalDate(new Date());
     const sql = `
       SELECT i.*, c.title as contract_title, cu.name as customer_name, cu.phone as customer_phone, m.name as manager_name
       FROM installments i
@@ -1595,7 +1625,7 @@ export const installmentService = {
        AND i.due_date < date('now')
       ORDER BY i.due_date ASC
     `;
-    const result = await database.query(sql);
+    const result = await database.query(sql, [todayText]);
     return result.values || [];
   },
 
@@ -2024,6 +2054,8 @@ export const managerService = {
   async getManagersWithOverdueCount(overdueThreshold = 30) {
     const database = await getDatabase();
     try {
+      const days = Math.max(0, parseInt(overdueThreshold, 10) || 30);
+      const cutoffText = formatLocalDate(addLocalDays(new Date(), -days));
       const sql = `
         SELECT 
           m.*,
@@ -2053,7 +2085,7 @@ export const managerService = {
               WHERE i.contract_id = c.id 
               AND (
                 cu.is_manually_flagged_as_overdue = 1
-                OR (i.status = 'pending' AND i.due_date < date('now', '-${overdueThreshold} days'))
+                OR (i.status = 'pending' AND i.due_date < ?)
               )
             )
             AND (cu.is_deleted IS NULL OR cu.is_deleted = 0)
@@ -2093,7 +2125,7 @@ export const managerService = {
         ) > 0
         AND (m.is_deleted IS NULL OR m.is_deleted = 0)
       `;
-      const result = await database.query(sql);
+      const result = await database.query(sql, [cutoffText, cutoffText, cutoffText, cutoffText]);
       return (result.values || []).map(m => ({
         ...m,
         total_remaining: Math.max(0, (m.total_contracts || 0) - (m.total_paid || 0))
