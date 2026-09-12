@@ -319,7 +319,7 @@ export const shareBackup = async () => {
         try {
           await navigator.share({
             title: BACKUP_FILE_NAME,
-            text: 'نسخة احتياطية من بيانات اقساطي',
+            text: 'نسخة احتياطية من بيانات أقساطي',
             files: [file]
           });
           return {
@@ -355,7 +355,7 @@ export const shareBackup = async () => {
 
     await Share.share({
       title: BACKUP_FILE_NAME,
-      text: 'نسخة احتياطية من بيانات اقساطي',
+      text: 'نسخة احتياطية من بيانات أقساطي',
       url: uri,
       files: [uri],
       dialogTitle: 'مشاركة النسخة الاحتياطية'
