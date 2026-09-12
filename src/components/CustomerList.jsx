@@ -62,6 +62,7 @@ const CustomerList = ({
   const [loading, setLoading] = useState(true);
   const [customerBalances, setCustomerBalances] = useState({});
   const [overdueStatus, setOverdueStatus] = useState({});
+  const [lateStatus, setLateStatus] = useState({});
   const [postponedStatus, setPostponedStatus] = useState({});
   const [customerMonthStatuses, setCustomerMonthStatuses] = useState({});
   const [recycleBinEnabled, setRecycleBinEnabled] = useState(false);
@@ -87,9 +88,10 @@ const CustomerList = ({
       const customerIds = data.map(customer => customer.id);
       const threshold = parseInt(overdueThresholdSetting, 10) || 30;
 
-      const [balanceSummaries, overdueMap, monthStatusMap, postponedMap] = await Promise.all([
+      const [balanceSummaries, overdueMap, lateMap, monthStatusMap, postponedMap] = await Promise.all([
         contractService.getCustomerBalanceSummaries(customerIds),
         contractService.getOverdueCustomerMap(customerIds, threshold),
+        contractService.getLateCustomerMap(customerIds),
         customerService.getCurrentMonthStatusMap(customerIds),
         contractService.getPostponedCustomerMap(customerIds)
       ]);
@@ -130,6 +132,7 @@ const CustomerList = ({
 
       setCustomerBalances(balances);
       setOverdueStatus(isOverdueMap);
+      setLateStatus(lateMap || {});
       setPostponedStatus(postponedMap || {});
       setCustomerMonthStatuses(monthStatusMap);
       setCustomers(data);
@@ -344,6 +347,7 @@ const CustomerList = ({
               const isOverdue = Boolean(
                 customer.is_deleted !== 1 && (
                   overdueStatus[customer.id] ||
+                  lateStatus[customer.id] ||
                   customer.is_manually_flagged_as_overdue ||
                   monthStatus === 'overdue'
                 )
