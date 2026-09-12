@@ -15,7 +15,7 @@ import { authService } from '../services/authService';
 const SUPPORT_PHONE_DISPLAY = '+966556854162';
 const SUPPORT_WHATSAPP_PHONE = '966556854162';
 
-const ToggleItem = ({ title, description, value, onToggle, icon }) => (
+const ToggleItem = ({ title, description, value, onToggle, icon, disabled = false }) => (
   <div className="settings-toggle-item border-b border-slate-700 last:border-0">
     <span className="settings-toggle-icon" aria-hidden="true">{icon}</span>
     <div className="settings-toggle-copy">
@@ -29,9 +29,11 @@ const ToggleItem = ({ title, description, value, onToggle, icon }) => (
       <button
         type="button"
         onClick={onToggle}
+        disabled={disabled}
         aria-pressed={value}
+        aria-busy={disabled}
         aria-label={`${title}: ${value ? 'مفعل' : 'متوقف'}`}
-        className={`settings-toggle ${value ? 'is-on' : 'is-off'}`}
+        className={`settings-toggle ${value ? 'is-on' : 'is-off'} disabled:cursor-wait disabled:opacity-60`}
       >
         <span className="settings-toggle__knob" aria-hidden="true" />
       </button>
@@ -444,6 +446,10 @@ const Settings = ({ onSettingsChange, onLicenseRenewed, currentUser, onLogout, i
   };
 
   const handleNotificationToggle = async () => {
+    if (updatingSetting) return;
+
+    const settingKey = 'installment_notifications_enabled';
+    setUpdatingSetting(settingKey);
     try {
       setNotificationStatus('جاري تحديث التنبيهات...');
       const result = await notificationService.setEnabled(!notificationsEnabled);
@@ -457,6 +463,8 @@ const Settings = ({ onSettingsChange, onLicenseRenewed, currentUser, onLogout, i
         setNotificationStatus('يرجى تسجيل الدخول قبل تفعيل تنبيهات الجهاز.');
       } else if (result.permission === 'denied') {
         setNotificationStatus('تم رفض إشعارات أقساطي من النظام. افتح إعدادات الإشعارات للموقع في Chrome أو إعدادات إشعارات التطبيق في iPhone، اختر السماح، ثم عُد واضغط الزر مرة أخرى. لا يستطيع الموقع إظهار نافذة السماح تلقائياً بعد الرفض.');
+      } else if (result.permission === 'registration_failed' || result.permission === 'push_service_unavailable') {
+        setNotificationStatus('تعذر تسجيل هذا الجهاز في خدمة الإشعارات. تحقق من اتصال الإنترنت ثم حاول مرة أخرى.');
       } else if (!result.enabled && notificationsEnabled) {
         setNotificationStatus('تم إيقاف تنبيهات الأقساط');
       } else if (!result.enabled) {
@@ -469,6 +477,8 @@ const Settings = ({ onSettingsChange, onLicenseRenewed, currentUser, onLogout, i
     } catch (error) {
       console.error('Notification toggle error:', error);
       setNotificationStatus('تعذر تحديث التنبيهات');
+    } finally {
+      setUpdatingSetting(null);
     }
   };
 
@@ -1004,6 +1014,7 @@ const Settings = ({ onSettingsChange, onLicenseRenewed, currentUser, onLogout, i
             description="إظهار تنبيه حتى لو كان التطبيق مغلقاً"
             value={notificationsEnabled}
             onToggle={handleNotificationToggle}
+            disabled={updatingSetting === 'installment_notifications_enabled'}
             icon="🔔"
           />
 
@@ -1211,4 +1222,4 @@ const Settings = ({ onSettingsChange, onLicenseRenewed, currentUser, onLogout, i
 
 export default Settings;
 
-  
+      
