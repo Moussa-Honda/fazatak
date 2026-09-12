@@ -344,16 +344,27 @@ export const notificationService = {
       return { enabled: false, scheduled: 0 };
     }
 
-    await settingsService.set('installment_notifications_enabled', 'true');
-    const result = await this.refreshSchedule({ requestPermission: true });
-
-    if (result.permission && result.permission !== 'granted') {
-      await settingsService.set('installment_notifications_enabled', 'false');
-      await cancelInstallmentNotifications({ removeWebSubscription: true });
-      return { ...result, enabled: false };
+    // Validate the device permission and web-push backend before changing the saved toggle.
+    const permission = await ensurePermission({ requestPermission: true });
+    if (!permission.granted) {
+      return { enabled: false, scheduled: 0, permission: permission.reason };
     }
 
-    return result;
+    await settingsService.set('installment_notifications_enabled', 'true');
+
+    try {
+      const result = await this.refreshSchedule();
+      if (result.permission && result.permission !== 'granted') {
+        await settingsService.set('installment_notifications_enabled', 'false');
+        await cancelInstallmentNotifications({ removeWebSubscription: true });
+        return { ...result, enabled: false };
+      }
+      return result;
+    } catch (error) {
+      await settingsService.set('installment_notifications_enabled', 'false');
+      await cancelInstallmentNotifications({ removeWebSubscription: true });
+      throw error;
+    }
   },
 
   async updateSetting(key, value) {
@@ -384,3 +395,5 @@ export const notificationService = {
     return { sent: true, permission: 'granted' };
   },
 };
+
+    
