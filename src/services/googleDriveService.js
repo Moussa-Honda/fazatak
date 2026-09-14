@@ -85,7 +85,7 @@ export const googleDriveService = {
     const backupData = await exportData();
 
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-    const fileName = `Fazatak_Backup_${timestamp}.json`;
+    const fileName = `أقساطي_Backup_${timestamp}.json`;
     const fileContent = JSON.stringify(backupData, null, 2);
 
     const metadata = {
@@ -94,7 +94,7 @@ export const googleDriveService = {
       description: `نسخة احتياطية لتطبيق أقساطي - ${new Date().toLocaleString('ar-SA')}`
     };
 
-    const boundary = '-------FazatakBackupBoundary' + Date.now();
+    const boundary = '-------AqastiBackupBoundary' + Date.now();
     const delimiter = `\r\n--${boundary}\r\n`;
     const closeDelimiter = `\r\n--${boundary}--`;
 
@@ -140,7 +140,7 @@ export const googleDriveService = {
   async listBackups(limit = 10) {
     const token = await this.getAccessToken();
 
-    const query = "name contains 'Fazatak_Backup' and trashed = false";
+    const query = "(name contains 'أقساطي_Backup' or name contains 'Fazatak_Backup') and trashed = false";
     const url = `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(query)}&orderBy=createdTime desc&pageSize=${limit}&fields=files(id,name,size,createdTime,modifiedTime)`;
 
     const response = await fetch(url, {
