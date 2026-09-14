@@ -3,7 +3,7 @@ import { Filesystem, Directory, Encoding } from '@capacitor/filesystem';
 import { Share } from '@capacitor/share';
 import { getDatabase } from './database';
 
-export const BACKUP_FILE_NAME = 'Fazatak_Main_Backup.json';
+export const BACKUP_FILE_NAME = 'أقساطي_Backup.json';
 
 const BACKUP_DIRECTORY = Directory.Documents;
 const BACKUP_VERSION = '2.0-offline';
