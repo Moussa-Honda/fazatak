@@ -435,13 +435,21 @@ const buildCustodyHTML = (custody, expenses, s) => {
     .reduce((sum, expense) => sum + (expense.amount || 0), 0);
   const remaining = (custody.capital || 0) - totalSpent;
 
-  const rows = expenses.map((exp) => `
-    <tr>
-      <td style="font-family:Arial,sans-serif; direction:ltr; color:#0f172a;">${fmtDate(exp.date)}</td>
-      <td style="color:#0f172a;">${exp.entry_type === 'receipt' ? 'سند قبض: ' : ''}${exp.description || '—'}</td>
-      <td class="${exp.entry_type === 'receipt' ? 'green' : 'red'}" style="font-weight:bold;">${exp.entry_type === 'receipt' ? '+' : '-'}${fmt(exp.amount)} ر.س</td>
-    </tr>
-  `).join('');
+  const rows = expenses.map((exp) => {
+    const isReceipt = exp.entry_type === 'receipt';
+    const method = exp.payment_method === 'transfer' ? 'تحويل' : 'نقدي';
+    const description = isReceipt
+      ? `سند قبض (${method}): ${exp.description || '—'}${exp.notes ? ` - ${exp.notes}` : ''}`
+      : `${exp.description || '—'}${exp.notes ? ` - ${exp.notes}` : ''}`;
+
+    return `
+      <tr>
+        <td style="font-family:Arial,sans-serif; direction:ltr; color:#0f172a;">${fmtDate(exp.date)}</td>
+        <td style="color:#0f172a;">${description}</td>
+        <td class="${isReceipt ? 'green' : 'red'}" style="font-weight:bold;">${isReceipt ? '+' : '-'}${fmt(exp.amount)} ر.س</td>
+      </tr>
+    `;
+  }).join('');
 
   return wrap(`
     ${headerHTML('كشف حساب عُهدة', `المسؤول: ${custody.name || ''}`, s)}
