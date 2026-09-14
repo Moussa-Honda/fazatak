@@ -12,6 +12,8 @@ const sanitizeName = (name) => {
   return name.replace(/\s*0+$/g, '').trim() || 'عميل';
 };
 
+const customerNameCollator = new Intl.Collator('ar', { sensitivity: 'base', numeric: true });
+
 const getCustomerMonthStatusDisplay = (status, managerId = null) => {
   const baseCard = `bg-[#1e293b]/60 ${managerId ? 'border-indigo-500/30' : 'border-slate-700/50'} shadow-slate-950/20`;
 
@@ -69,6 +71,7 @@ const CustomerList = ({
   const [postponedStatus, setPostponedStatus] = useState({});
   const [customerMonthStatuses, setCustomerMonthStatuses] = useState({});
   const [recycleBinEnabled, setRecycleBinEnabled] = useState(false);
+  const [sortCustomersAlphabetically, setSortCustomersAlphabetically] = useState(false);
   const privacyMode = usePrivacyMode();
   const themeColor = managerId ? 'indigo' : 'blue';
   const themeBg = managerId ? 'bg-indigo-600' : 'bg-blue-600';
@@ -78,11 +81,13 @@ const CustomerList = ({
   const loadCustomers = useCallback(async () => {
     setLoading(true);
     try {
-      const [isRecycleBinEnabled, overdueThresholdSetting] = await Promise.all([
+      const [isRecycleBinEnabled, overdueThresholdSetting, sortCustomersSetting] = await Promise.all([
         settingsService.get('recycle_bin_enabled'),
-        settingsService.get('overdue_threshold_days')
+        settingsService.get('overdue_threshold_days'),
+        settingsService.get('sort_customers_alphabetically')
       ]);
       setRecycleBinEnabled(isRecycleBinEnabled === 'true');
+      setSortCustomersAlphabetically(sortCustomersSetting === 'true');
 
       // Use managerId if provided, otherwise 'personal' to show only user's own customers in main list
       const filterId = managerId || 'personal';
@@ -173,8 +178,14 @@ const CustomerList = ({
       );
     }
     
+    if (sortCustomersAlphabetically) {
+      result = [...result].sort((a, b) => (
+        customerNameCollator.compare(sanitizeName(a.name), sanitizeName(b.name)) || Number(a.id) - Number(b.id)
+      ));
+    }
+
     setFiltered(result);
-  }, [customers, search, activeTab, overdueStatus, filterType]);
+  }, [customers, search, activeTab, overdueStatus, filterType, sortCustomersAlphabetically]);
 
   useEffect(() => {
     filterCustomers();
