@@ -485,6 +485,8 @@ const createTables = async () => {
       description TEXT,
       date DATE DEFAULT CURRENT_DATE,
       entry_type TEXT NOT NULL DEFAULT 'expense',
+      payment_method TEXT NOT NULL DEFAULT 'cash',
+      notes TEXT,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY (portfolio_id) REFERENCES portfolios(id) ON DELETE CASCADE
     );
@@ -495,6 +497,14 @@ const createTables = async () => {
   // Existing installations do not have the operation type column yet.
   try {
     await db.execute(`ALTER TABLE portfolio_expenses ADD COLUMN entry_type TEXT NOT NULL DEFAULT 'expense'`);
+  } catch {}
+
+  try {
+    await db.execute(`ALTER TABLE portfolio_expenses ADD COLUMN payment_method TEXT NOT NULL DEFAULT 'cash'`);
+  } catch {}
+
+  try {
+    await db.execute(`ALTER TABLE portfolio_expenses ADD COLUMN notes TEXT`);
   } catch {}
 
   try {
@@ -2080,9 +2090,16 @@ export const portfolioService = {
       [value, id]
     );
     const receiptResult = await database.run(
-      `INSERT INTO portfolio_expenses (portfolio_id, amount, description, date, entry_type)
-       VALUES (?, ?, ?, ?, 'receipt')`,
-      [id, value, receipt.description || 'سند قبض - إضافة مبلغ', receipt.date || new Date().toISOString().split('T')[0]]
+      `INSERT INTO portfolio_expenses (portfolio_id, amount, description, date, entry_type, payment_method, notes)
+       VALUES (?, ?, ?, ?, 'receipt', ?, ?)`,
+      [
+        id,
+        value,
+        receipt.description || 'سند قبض - إضافة مبلغ',
+        receipt.date || new Date().toISOString().split('T')[0],
+        receipt.payment_method === 'transfer' ? 'transfer' : 'cash',
+        receipt.notes || null
+      ]
     );
     const receiptId = receiptResult.changes?.lastId || receiptResult.lastId;
     notifyDataChanged({ scope: 'portfolios', action: 'add-capital', id, amount: value, receiptId });
@@ -2099,13 +2116,15 @@ export const portfolioService = {
 export const portfolioExpenseService = {
   async create(expense) {
     const database = await getDatabase();
-    const sql = `INSERT INTO portfolio_expenses (portfolio_id, amount, description, date, entry_type) VALUES (?, ?, ?, ?, ?)`;
+    const sql = `INSERT INTO portfolio_expenses (portfolio_id, amount, description, date, entry_type, payment_method, notes) VALUES (?, ?, ?, ?, ?, ?, ?)`;
     const result = await database.run(sql, [
       expense.portfolio_id, 
       expense.amount, 
       expense.description || null, 
       expense.date || new Date().toISOString().split('T')[0],
-      expense.entry_type || 'expense'
+      expense.entry_type || 'expense',
+      expense.payment_method === 'transfer' ? 'transfer' : 'cash',
+      expense.notes || null
     ]);
     const id = result.changes?.lastId || result.lastId;
     notifyDataChanged({ scope: 'portfolio_expenses', action: 'create', id, portfolioId: expense.portfolio_id });
@@ -2121,7 +2140,7 @@ export const portfolioExpenseService = {
   async delete(id) {
     const database = await getDatabase();
     const existingResult = await database.query(
-      `SELECT portfolio_id, amount, entry_type FROM portfolio_expenses WHERE id = ?`,
+      `SELECT portfolio_id, amount, entry_type, payment_method, notes FROM portfolio_expenses WHERE id = ?`,
       [id]
     );
     const existing = existingResult.values?.[0];
@@ -2148,7 +2167,7 @@ export const portfolioExpenseService = {
     if (value <= 0) throw new Error('Expense amount must be greater than zero');
 
     const existingResult = await database.query(
-      `SELECT portfolio_id, amount, entry_type FROM portfolio_expenses WHERE id = ?`,
+      `SELECT portfolio_id, amount, entry_type, payment_method, notes FROM portfolio_expenses WHERE id = ?`,
       [id]
     );
     const existing = existingResult.values?.[0];
@@ -2166,9 +2185,16 @@ export const portfolioExpenseService = {
 
     await database.run(
       `UPDATE portfolio_expenses
-       SET amount = ?, description = ?, date = ?
+       SET amount = ?, description = ?, date = ?, payment_method = ?, notes = ?
        WHERE id = ?`,
-      [value, expense.description || null, expense.date || new Date().toISOString().split('T')[0], id]
+      [
+        value,
+        expense.description || null,
+        expense.date || new Date().toISOString().split('T')[0],
+        expense.payment_method === 'transfer' ? 'transfer' : (existing.payment_method || 'cash'),
+        expense.notes ?? existing.notes ?? null,
+        id
+      ]
     );
     notifyDataChanged({
       scope: 'portfolio_expenses',
