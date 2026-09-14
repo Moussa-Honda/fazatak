@@ -1,8 +1,10 @@
 import { useState, useEffect, useCallback } from 'react';
-import { managerService } from '../services/database';
+import { managerService, settingsService } from '../services/database';
 import ManagerModal from './ManagerModal';
 import { useLiveRefresh } from '../hooks/useLiveRefresh';
 import { formatPrivateAmount, usePrivacyMode } from '../hooks/usePrivacyMode';
+
+const managerNameCollator = new Intl.Collator('ar', { sensitivity: 'base', numeric: true });
 
 const ManagerList = ({ onSelectManager, onBack, filterType = 'all', isReadOnly = false, onRenewalRequest }) => {
   const [managers, setManagers] = useState([]);
@@ -17,6 +19,7 @@ const ManagerList = ({ onSelectManager, onBack, filterType = 'all', isReadOnly =
     setLoading(true);
     try {
       let data;
+      const sortCustomersSetting = await settingsService.get('sort_customers_alphabetically');
       if (filterType === 'overdue') {
         data = await managerService.getManagersWithOverdueCount();
       } else if (showDeleted) {
@@ -24,6 +27,12 @@ const ManagerList = ({ onSelectManager, onBack, filterType = 'all', isReadOnly =
         data = await managerService.getAllWithStats(true);
       } else {
         data = await managerService.getAllWithStats();
+      }
+
+      if (sortCustomersSetting === 'true') {
+        data = [...data].sort((a, b) => (
+          managerNameCollator.compare(String(a.name || '').trim(), String(b.name || '').trim()) || Number(a.id) - Number(b.id)
+        ));
       }
       setManagers(data);
     } catch (error) {
