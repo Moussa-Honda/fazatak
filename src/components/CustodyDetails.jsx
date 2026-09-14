@@ -244,12 +244,18 @@ const CustodyDetails = ({ custody, onBack, isReadOnly = false, onRenewalRequest 
                         >
                           {isReceipt ? 'سند قبض' : 'مصروف'}
                         </span>
+                        {isReceipt && (
+                          <span className="shrink-0 rounded-full bg-slate-700/70 px-2 py-0.5 text-[10px] font-bold text-slate-300">
+                            {exp.payment_method === 'transfer' ? 'تحويل' : 'نقدي'}
+                          </span>
+                        )}
                       </div>
                       <div className="text-[10px] text-slate-500">
                         {exp.date}
                         {hijriEnabled && (
                           <span className="block text-slate-600">{toHijriDate(exp.date)}</span>
                         )}
+                        {exp.notes && <span className="mt-1 block text-slate-400">ملاحظة: {exp.notes}</span>}
                       </div>
                     </div>
                   </div>
