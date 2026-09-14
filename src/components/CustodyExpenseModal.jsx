@@ -6,7 +6,9 @@ const CustodyExpenseModal = ({ portfolioId, expense = null, onClose, onSaved }) 
   const [formData, setFormData] = useState({
     amount: expense?.amount?.toString() || '',
     description: expense?.description || (isReceipt ? 'سند قبض - إضافة مبلغ' : ''),
-    date: expense?.date || new Date().toISOString().split('T')[0]
+    date: expense?.date || new Date().toISOString().split('T')[0],
+    payment_method: expense?.payment_method === 'transfer' ? 'transfer' : 'cash',
+    notes: expense?.notes || ''
   });
   const [loading, setLoading] = useState(false);
 
@@ -14,7 +16,9 @@ const CustodyExpenseModal = ({ portfolioId, expense = null, onClose, onSaved }) 
     setFormData({
       amount: expense?.amount?.toString() || '',
       description: expense?.description || (expense?.entry_type === 'receipt' ? 'سند قبض - إضافة مبلغ' : ''),
-      date: expense?.date || new Date().toISOString().split('T')[0]
+      date: expense?.date || new Date().toISOString().split('T')[0],
+      payment_method: expense?.payment_method === 'transfer' ? 'transfer' : 'cash',
+      notes: expense?.notes || ''
     });
   }, [expense]);
 
@@ -32,7 +36,9 @@ const CustodyExpenseModal = ({ portfolioId, expense = null, onClose, onSaved }) 
         amount: parseFloat(formData.amount),
         description: formData.description,
         date: formData.date,
-        entry_type: isReceipt ? 'receipt' : 'expense'
+        entry_type: isReceipt ? 'receipt' : 'expense',
+        payment_method: formData.payment_method,
+        notes: formData.notes.trim() || null
       };
 
       if (expense) {
@@ -109,6 +115,45 @@ const CustodyExpenseModal = ({ portfolioId, expense = null, onClose, onSaved }) 
                 required
               />
             </div>
+
+            {isReceipt && (
+              <>
+                <div>
+                  <label className="block text-sm font-medium text-slate-400 mb-1.5">طريقة الاستلام</label>
+                  <div className="grid grid-cols-2 gap-2">
+                    {[
+                      { value: 'cash', label: 'نقدي' },
+                      { value: 'transfer', label: 'تحويل' }
+                    ].map((method) => (
+                      <button
+                        key={method.value}
+                        type="button"
+                        onClick={() => setFormData({ ...formData, payment_method: method.value })}
+                        aria-pressed={formData.payment_method === method.value}
+                        className={`rounded-xl border px-4 py-3 font-bold transition-colors ${
+                          formData.payment_method === method.value
+                            ? 'border-blue-500 bg-blue-500/15 text-blue-300'
+                            : 'border-slate-700 bg-slate-900 text-slate-400 hover:border-slate-600 hover:text-white'
+                        }`}
+                      >
+                        {method.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-slate-400 mb-1.5">ملاحظات (اختياري)</label>
+                  <textarea
+                    value={formData.notes}
+                    onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
+                    rows={3}
+                    className="w-full resize-none bg-slate-900 border border-slate-700 rounded-2xl px-4 py-4 text-white focus:border-blue-500 focus:outline-none transition-colors shadow-inner"
+                    placeholder="أضف أي تفاصيل عن المبلغ..."
+                  />
+                </div>
+              </>
+            )}
           </div>
 
           <button
