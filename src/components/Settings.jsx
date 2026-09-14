@@ -183,6 +183,7 @@ const Settings = ({ onSettingsChange, onLicenseRenewed, currentUser, onLogout, i
   }, []);
   const [showCustodySection, setShowCustodySection] = useState(true);
   const [quickPaymentMode, setQuickPaymentMode] = useState(false);
+  const [sortCustomersAlphabetically, setSortCustomersAlphabetically] = useState(false);
   const [privacyMode, setPrivacyMode] = useState(false);
   const [screenPrivacy, setScreenPrivacy] = useState(true);
   const [hijriCalendar, setHijriCalendar] = useState(false);
@@ -232,7 +233,7 @@ const Settings = ({ onSettingsChange, onLicenseRenewed, currentUser, onLogout, i
         quick, privacy, screenPrivacyValue,
         bizName, bizContact, taxNo, showPdf, stampEnabled, stampImage, stampText, signatureEnabled, signatureImage, signatureText, overThreshold, stagThreshold,
         dueAlerts, whatsappText,
-         showCustody, showTicker
+         showCustody, showTicker, sortCustomers
       ] = await Promise.all([
         settingsService.get('quick_payment_mode'),
         settingsService.get('privacy_mode'),
@@ -252,11 +253,13 @@ const Settings = ({ onSettingsChange, onLicenseRenewed, currentUser, onLogout, i
         settingsService.get('due_alerts_enabled'),
         settingsService.getWhatsAppTemplate(),
          settingsService.get('show_custody_section'),
-         settingsService.get('show_motivational_ticker')
+         settingsService.get('show_motivational_ticker'),
+         settingsService.get('sort_customers_alphabetically')
       ]);
       
       setShowCustodySection(showCustody !== 'false');
       setShowMotivationalTicker(showTicker !== 'false');
+      setSortCustomersAlphabetically(sortCustomers === 'true');
       setQuickPaymentMode(quick === 'true');
       setPrivacyMode(privacy === 'true');
       setScreenPrivacy(screenPrivacyValue !== 'false');
@@ -741,6 +744,7 @@ const Settings = ({ onSettingsChange, onLicenseRenewed, currentUser, onLogout, i
         <ToggleItem title="التاريخ الهجري" description="عرض التاريخ الهجري" value={hijriCalendar} onToggle={() => toggleSetting('hijri_calendar', hijriCalendar, setHijriCalendar)} icon="📅" />
         <ToggleItem title="قسم العهد" description="إظهار قسم العهد في الشريط السفلي" value={showCustodySection} onToggle={() => toggleSetting('show_custody_section', showCustodySection, setShowCustodySection)} icon="💼" />
          <ToggleItem title="الرسائل التحفيزية" description="عرض آية أو ذكر أو عبارة تشجيعية بجانب شعار أقساطي" value={showMotivationalTicker} onToggle={() => toggleSetting('show_motivational_ticker', showMotivationalTicker, setShowMotivationalTicker)} icon="✨" />
+         <ToggleItem title="ترتيب العملاء أبجديًا" description="عرض العملاء حسب الاسم من أ إلى ي" value={sortCustomersAlphabetically} onToggle={() => toggleSetting('sort_customers_alphabetically', sortCustomersAlphabetically, setSortCustomersAlphabetically)} icon="🔤" />
       </div>
 
       {/* Account Security Section */}
