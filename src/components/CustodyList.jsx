@@ -95,6 +95,24 @@ const CustodyList = ({ onSelectCustody, isReadOnly, onRenewalRequest }) => {
               className="bg-[#0f172a] border border-slate-800 rounded-2xl p-4 card-hover cursor-pointer flex flex-col gap-4"
             >
               <div className="flex items-start justify-between gap-4">
+                {/* Name */}
+                <div className="min-w-0 flex-1 text-right">
+                  <h3
+                    className="line-clamp-2 break-words text-lg font-bold leading-tight text-white"
+                    title={item.name}
+                  >
+                    {item.name}
+                  </h3>
+                  {item.description && (
+                    <p
+                      className="mt-1 line-clamp-1 break-words text-xs leading-5 text-slate-500"
+                      title={item.description}
+                    >
+                      {item.description}
+                    </p>
+                  )}
+                </div>
+
                 {/* Actions */}
                 <div className="flex shrink-0 items-start gap-3" onClick={e => e.stopPropagation()}>
                   <div className="flex flex-col items-center gap-1">
@@ -141,27 +159,9 @@ const CustodyList = ({ onSelectCustody, isReadOnly, onRenewalRequest }) => {
                   </div>
                 </div>
 
-                {/* Name & Icon */}
-                <div className="flex min-w-0 flex-1 items-center gap-3">
-                  <div className="min-w-0 flex-1 text-right">
-                    <h3
-                      className="line-clamp-2 break-words text-lg font-bold leading-tight text-white"
-                      title={item.name}
-                    >
-                      {item.name}
-                    </h3>
-                    {item.description && (
-                      <p
-                        className="mt-1 line-clamp-1 break-words text-xs leading-5 text-slate-500"
-                        title={item.description}
-                      >
-                        {item.description}
-                      </p>
-                    )}
-                  </div>
-                  <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full border border-blue-500/20 bg-blue-500/10 text-xl shadow-lg">
-                    🏦
-                  </div>
+                {/* Icon */}
+                <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full border border-blue-500/20 bg-blue-500/10 text-xl shadow-lg">
+                  🏦
                 </div>
               </div>
 
