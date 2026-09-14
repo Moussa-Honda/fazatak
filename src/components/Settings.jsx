@@ -212,6 +212,19 @@ const Settings = ({ onSettingsChange, onLicenseRenewed, currentUser, onLogout, i
   const [renewalLoading, setRenewalLoading] = useState(false);
   const [renewalMessage, setRenewalMessage] = useState('');
   const [deviceCopied, setDeviceCopied] = useState(false);
+  const [subscriptionNow, setSubscriptionNow] = useState(() => Date.now());
+
+  useEffect(() => {
+    const interval = setInterval(() => setSubscriptionNow(Date.now()), 60 * 1000);
+    return () => clearInterval(interval);
+  }, []);
+
+  const subscriptionExpiryMs = currentUser?.subscription_expiry
+    ? new Date(currentUser.subscription_expiry).getTime()
+    : NaN;
+  const remainingTrialDays = Number.isFinite(subscriptionExpiryMs)
+    ? Math.max(0, Math.ceil((subscriptionExpiryMs - subscriptionNow) / (24 * 60 * 60 * 1000)))
+    : null;
 
   async function loadSettings() {
     try {
@@ -556,7 +569,11 @@ const Settings = ({ onSettingsChange, onLicenseRenewed, currentUser, onLogout, i
                 {isReadOnly 
                   ? 'منتهي (وضع العرض فقط)' 
                   : currentUser.subscription_status === 'trial' 
-                    ? 'فترة تجريبية سارية (35 يوماً)' 
+                    ? remainingTrialDays === null
+                      ? 'فترة تجريبية سارية'
+                      : remainingTrialDays > 0
+                        ? `فترة تجريبية سارية (باقي ${remainingTrialDays} يوم)`
+                        : 'انتهت الفترة التجريبية'
                     : 'اشتراك نشط'}
               </span>
             </div>
