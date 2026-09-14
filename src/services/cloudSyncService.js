@@ -319,7 +319,7 @@ export const cloudSyncService = {
       // حفظ نسخة تاريخية في fazatak_backups إن وجدت معاملات فعلية
       if (localBusinessCount > 0) {
         supabase.from('fazatak_backups').insert([{
-          file_name: `CloudSync_${phone}_${Date.now()}.json`,
+          file_name: `أقساطي_CloudSync_${phone}_${Date.now()}.json`,
           version: '2.0-offline',
           records_count: totalRecordsCount,
           tables_count: Object.keys(payload.tables || {}).length,
