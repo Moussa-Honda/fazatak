@@ -5,6 +5,8 @@ import { formatPrivateAmount, usePrivacyMode } from '../hooks/usePrivacyMode';
 const CustodyAddFundsModal = ({ custody, onClose, onSaved }) => {
   const [amount, setAmount] = useState('');
   const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
+  const [paymentMethod, setPaymentMethod] = useState('cash');
+  const [notes, setNotes] = useState('');
   const [loading, setLoading] = useState(false);
   const privacyMode = usePrivacyMode();
 
@@ -19,7 +21,11 @@ const CustodyAddFundsModal = ({ custody, onClose, onSaved }) => {
 
     setLoading(true);
     try {
-      await portfolioService.addCapital(custody.id, value, { date });
+      await portfolioService.addCapital(custody.id, value, {
+        date,
+        payment_method: paymentMethod,
+        notes: notes.trim() || null
+      });
       onSaved();
     } catch (error) {
       console.error('Failed to add custody funds:', error);
@@ -77,6 +83,41 @@ const CustodyAddFundsModal = ({ custody, onClose, onSaved }) => {
               onChange={(event) => setDate(event.target.value)}
               className="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 text-white focus:border-blue-500 focus:outline-none transition-colors"
               required
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-slate-400 mb-1.5">طريقة الاستلام</label>
+            <div className="grid grid-cols-2 gap-2">
+              {[
+                { value: 'cash', label: 'نقدي' },
+                { value: 'transfer', label: 'تحويل' }
+              ].map((method) => (
+                <button
+                  key={method.value}
+                  type="button"
+                  onClick={() => setPaymentMethod(method.value)}
+                  aria-pressed={paymentMethod === method.value}
+                  className={`rounded-xl border px-4 py-3 font-bold transition-colors ${
+                    paymentMethod === method.value
+                      ? 'border-blue-500 bg-blue-500/15 text-blue-300'
+                      : 'border-slate-700 bg-slate-900 text-slate-400 hover:border-slate-600 hover:text-white'
+                  }`}
+                >
+                  {method.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-slate-400 mb-1.5">ملاحظات (اختياري)</label>
+            <textarea
+              value={notes}
+              onChange={(event) => setNotes(event.target.value)}
+              rows={3}
+              className="w-full resize-none bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 text-white focus:border-blue-500 focus:outline-none transition-colors"
+              placeholder="أضف أي تفاصيل عن المبلغ..."
             />
           </div>
 
