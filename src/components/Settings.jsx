@@ -744,7 +744,7 @@ const Settings = ({ onSettingsChange, onLicenseRenewed, currentUser, onLogout, i
         <ToggleItem title="التاريخ الهجري" description="عرض التاريخ الهجري" value={hijriCalendar} onToggle={() => toggleSetting('hijri_calendar', hijriCalendar, setHijriCalendar)} icon="📅" />
         <ToggleItem title="قسم العهد" description="إظهار قسم العهد في الشريط السفلي" value={showCustodySection} onToggle={() => toggleSetting('show_custody_section', showCustodySection, setShowCustodySection)} icon="💼" />
          <ToggleItem title="الرسائل التحفيزية" description="عرض آية أو ذكر أو عبارة تشجيعية بجانب شعار أقساطي" value={showMotivationalTicker} onToggle={() => toggleSetting('show_motivational_ticker', showMotivationalTicker, setShowMotivationalTicker)} icon="✨" />
-         <ToggleItem title="ترتيب العملاء أبجديًا" description="عرض العملاء حسب الاسم من أ إلى ي" value={sortCustomersAlphabetically} onToggle={() => toggleSetting('sort_customers_alphabetically', sortCustomersAlphabetically, setSortCustomersAlphabetically)} icon="🔤" />
+         <ToggleItem title="ترتيب العملاء والحسابات أبجديًا" description="عرض العملاء والحسابات بالنيابة حسب الاسم من أ إلى ي" value={sortCustomersAlphabetically} onToggle={() => toggleSetting('sort_customers_alphabetically', sortCustomersAlphabetically, setSortCustomersAlphabetically)} icon="🔤" />
       </div>
 
       {/* Account Security Section */}
