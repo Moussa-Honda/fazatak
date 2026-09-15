@@ -579,7 +579,7 @@ const Dashboard = ({ isExpired, expiry, onReActivate, currentUser, onLogout }) =
                     if (isExpired) return setShowRenewal(true);
                     const newValue = !selectedCustomer.is_manually_flagged_as_overdue;
                     await customerService.update(selectedCustomer.id, { is_manually_flagged_as_overdue: newValue });
-                    setSelectedCustomer({ ...selectedCustomer, is_manually_flagged_as_overdue: newValue });
+                    setSelectedCustomer(null);
                   }}
                   className={`px-3 py-2 rounded-lg text-xs font-bold transition-all border ${
                     selectedCustomer.is_manually_flagged_as_overdue 
