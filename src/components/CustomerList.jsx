@@ -167,8 +167,7 @@ const CustomerList = ({
     } else if (activeTab === 'deleted') {
       result = result.filter(c => c.is_deleted === 1);
     } else {
-      // Keep all customers visible in their tab (overdue accounts have distinct visual indicators)
-      result = result.filter(c => c.status === activeTab && (!c.is_deleted));
+      result = result.filter(c => c.status === activeTab && (!c.is_deleted) && !overdueStatus[c.id]);
     }
     
     if (search.trim()) {
@@ -202,7 +201,10 @@ const CustomerList = ({
 
     setPdfLoading(true);
     try {
-      const reportCustomers = customers.filter(customer => customer.is_deleted !== 1);
+      const reportCustomers = customers.filter((customer) => {
+        if (customer.is_deleted === 1) return false;
+        return filterType === 'overdue' ? overdueStatus[customer.id] : !overdueStatus[customer.id];
+      });
       await generatePDF(null, PDF_MODES.CUSTOMERS_SUMMARY, {
         customers: reportCustomers,
         summaries: customerReportSummaries,
@@ -340,14 +342,14 @@ const CustomerList = ({
             onClick={handleExportCustomersPDF}
             disabled={pdfLoading || loading}
             className={`${managerId ? 'bg-indigo-500/15 border-indigo-500/40 text-indigo-300 hover:bg-indigo-500/25' : 'bg-blue-500/15 border-blue-500/40 text-blue-300 hover:bg-blue-500/25'} border px-3 py-3 rounded-xl font-bold flex items-center gap-1.5 transition-colors disabled:opacity-50`}
-            title="طباعة PDF شامل لكل العملاء"
+            title={filterType === 'overdue' ? 'طباعة كشف المتعثرين' : 'طباعة كشف العملاء غير المتعثرين'}
           >
             {pdfLoading ? (
               <span className="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin" />
             ) : (
               <span className="text-sm">PDF</span>
             )}
-            <span className="hidden sm:inline text-xs">كشف العملاء</span>
+              <span className="hidden sm:inline text-xs">{filterType === 'overdue' ? 'كشف المتعثرين' : 'كشف العملاء'}</span>
           </button>
         </div>
 
