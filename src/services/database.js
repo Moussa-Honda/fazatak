@@ -1538,13 +1538,34 @@ export const installmentService = {
       }
     }
 
-    const updatedInstallment = await this.getById(id);
     const contract = await contractService.getById(installment.contract_id);
-    if (contract && updatedInstallment && getRemainingAmount(updatedInstallment) <= 0) {
-      try {
-        await customerService.setCurrentMonthStatus(contract.customer_id, 'paid');
-      } catch (statusError) {
-        console.warn('Monthly status update failed:', statusError);
+    if (contract) {
+      const contractInstallments = await this.getByContractId(installment.contract_id);
+      const totalPaid = roundCurrency(
+        contractInstallments.reduce((sum, item) => sum + getPaidAmount(item), 0)
+      );
+      const contractTotal = roundCurrency(contract.total_amount);
+      const totalDue = Math.max(0, roundCurrency(contractTotal - Number(contract.discount_amount || 0)));
+      const isContractComplete = totalPaid + 0.009 >= totalDue;
+
+      if (isContractComplete) {
+        await database.run(`UPDATE contracts SET status = 'completed' WHERE id = ?`, [contract.id]);
+        notifyDataChanged({ scope: 'contracts', action: 'complete', id: contract.id, customerId: contract.customer_id });
+
+        try {
+          await customerService.checkAndArchive(contract.customer_id);
+        } catch (archiveError) {
+          console.warn('checkAndArchive after payment failed:', archiveError);
+        }
+      }
+
+      const updatedInstallment = await this.getById(id);
+      if (updatedInstallment && getRemainingAmount(updatedInstallment) <= 0) {
+        try {
+          await customerService.setCurrentMonthStatus(contract.customer_id, 'paid');
+        } catch (statusError) {
+          console.warn('Monthly status update failed:', statusError);
+        }
       }
     }
 
