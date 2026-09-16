@@ -12,13 +12,10 @@ const formatManagerUpdatedAt = (value) => {
   const normalizedValue = rawValue.includes('T') ? rawValue : `${rawValue.replace(' ', 'T')}Z`;
   const date = new Date(normalizedValue);
   if (Number.isNaN(date.getTime())) return 'غير متوفر';
-  return date.toLocaleString('ar-SA', {
-    year: 'numeric',
-    month: 'short',
-    day: 'numeric',
-    hour: 'numeric',
-    minute: '2-digit'
-  });
+  const datePart = `${date.getFullYear()}/${String(date.getMonth() + 1).padStart(2, '0')}/${String(date.getDate()).padStart(2, '0')}`;
+  const timePart = date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true });
+  const [clock, period] = timePart.split(' ');
+  return `${clock} ${period === 'AM' ? 'ص' : 'م'} • ${datePart}`;
 };
 
 const ManagerList = ({ onSelectManager, onBack, filterType = 'all', isReadOnly = false, onRenewalRequest }) => {
@@ -223,11 +220,6 @@ const ManagerList = ({ onSelectManager, onBack, filterType = 'all', isReadOnly =
                       </svg>
                       {manager.phone || 'بدون رقم'}
                     </p>
-                    {showManagerLastUpdated && (
-                      <p className="text-slate-500 text-[10px] font-medium mt-1">
-                        آخر تعديل: {formatManagerUpdatedAt(manager.updated_at || manager.created_at)}
-                      </p>
-                    )}
                   </div>
                   {!isDeletedView && (
                     <button
@@ -285,6 +277,20 @@ const ManagerList = ({ onSelectManager, onBack, filterType = 'all', isReadOnly =
                     </p>
                   </div>
                 </div>
+                {showManagerLastUpdated && (
+                  <div className="mt-6 pt-4 border-t border-slate-600/70 flex items-center justify-between gap-3" dir="rtl">
+                    <div className="flex items-center gap-2 text-slate-300 text-sm font-bold">
+                      <svg className="w-5 h-5 text-emerald-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <circle cx="12" cy="12" r="9" strokeWidth="2" />
+                        <path strokeLinecap="round" strokeWidth="2" d="M12 7v5l3 2" />
+                      </svg>
+                      <span>آخر تعديل:</span>
+                    </div>
+                    <time className="text-emerald-200 text-sm font-black" dir="ltr">
+                      {formatManagerUpdatedAt(manager.updated_at || manager.created_at)}
+                    </time>
+                  </div>
+                )}
                 {isDeletedView && (
                   <p className="text-rose-300/80 text-xs font-bold mt-4">
                     يُحذف سجل الحساب نهائياً بعد 7 أيام، مع بقاء العملاء وبياناتهم محفوظة ومخفية عن الرئيسية.
