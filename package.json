@@ -8,6 +8,7 @@
     "build": "vite build",
     "build:android": "node version-manager.js && vite build && npx cap sync android",
     "version:up": "node version-manager.js",
+    "test": "node --test tests/*.test.js",
     "lint": "eslint .",
     "preview": "vite preview"
   },
