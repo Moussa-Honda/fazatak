@@ -5,7 +5,8 @@ export const roundCurrency = (value) => Math.round((Number(value) || 0) * 100) /
 export const getPaidAmount = (installment) => {
   const actualPaid = Number(installment?.actual_paid || 0);
   const status = String(installment?.status || '').trim().toLowerCase();
-  if (status === 'paid' && actualPaid <= 0) {
+  const discountAmount = Number(installment?.discount_amount || 0);
+  if (status === 'paid' && actualPaid <= 0 && discountAmount <= 0) {
     return Number(installment?.amount || 0);
   }
   return actualPaid;
@@ -43,7 +44,7 @@ export const calculateEarlySettlement = (installments = [], contractAmount, requ
 
   // A postponed row is the source of a replacement row, so only pending rows receive settlement money.
   for (const installment of installments) {
-    if (remainingPayment <= 0 || installment.status !== 'pending') continue;
+    if ((remainingPayment <= 0 && remainingDiscount <= 0) || installment.status !== 'pending') continue;
 
     const amount = roundCurrency(installment.amount);
     const paidBefore = roundCurrency(getPaidAmount(installment));
@@ -55,13 +56,14 @@ export const calculateEarlySettlement = (installments = [], contractAmount, requ
       Math.min(remainingDiscount, Math.max(0, remainingInstallment - cashApplied))
     );
     const applied = roundCurrency(cashApplied + discountApplied);
-    const paidAfter = roundCurrency(paidBefore + applied);
-    const isPaid = paidAfter + PAYMENT_TOLERANCE >= amount;
+    const paidAfter = roundCurrency(paidBefore + cashApplied);
+    const isPaid = paidAfter + discountApplied + PAYMENT_TOLERANCE >= amount;
 
     updates.push({
       id: installment.id,
       status: isPaid ? 'paid' : 'pending',
-      actual_paid: isPaid ? amount : paidAfter,
+      actual_paid: paidAfter,
+      discount_amount: discountApplied,
       applied: cashApplied,
       discountApplied
     });
@@ -80,4 +82,3 @@ export const calculateEarlySettlement = (installments = [], contractAmount, requ
     updates
   };
 };
-
