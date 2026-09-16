@@ -1126,24 +1126,64 @@ export const contractService = {
     const contract = await this.getById(contractId);
     if (!contract) throw new Error('Contract not found: ' + contractId);
 
-    const safeDiscount = Math.max(0, Number(discountAmount) || 0);
+    const contractAmount = roundCurrency(contract.total_amount);
+    const requestedDiscount = Math.max(0, Number(discountAmount) || 0);
 
     let transactionStarted = false;
     try {
       await database.beginTransaction();
       transactionStarted = true;
 
-      // 1. Update contract with discount and mark as completed
+      const installmentResult = await database.query(
+        `SELECT * FROM installments WHERE contract_id = ? ORDER BY due_date ASC, id ASC`,
+        [contractId]
+      );
+      const installments = installmentResult.values || [];
+      const totalPaid = roundCurrency(installments.reduce((sum, item) => sum + getPaidAmount(item), 0));
+
+      if (totalPaid > contractAmount + 0.009) {
+        throw new Error('لا يمكن تنفيذ السداد المبكر لأن المدفوع الحالي يتجاوز إجمالي العقد');
+      }
+
+      const outstandingBeforeDiscount = roundCurrency(Math.max(0, contractAmount - totalPaid));
+      const safeDiscount = roundCurrency(Math.min(requestedDiscount, outstandingBeforeDiscount));
+      let remainingPayment = roundCurrency(
+        Math.min(outstandingBeforeDiscount - safeDiscount, Math.max(0, contractAmount - totalPaid))
+      );
+
+      // A postponed installment is only the source of a replacement installment.
+      // Settling it as well would count the postponed amount twice.
+      for (const installment of installments) {
+        if (remainingPayment <= 0 || installment.status !== 'pending') continue;
+
+        const amount = roundCurrency(installment.amount);
+        const paidBefore = roundCurrency(getPaidAmount(installment));
+        const remainingInstallment = roundCurrency(Math.max(0, amount - paidBefore));
+        if (remainingInstallment <= 0) continue;
+
+        const applied = roundCurrency(Math.min(remainingPayment, remainingInstallment));
+        const paidAfter = roundCurrency(paidBefore + applied);
+        const isPaid = paidAfter + 0.009 >= amount;
+
+        await database.run(
+          `UPDATE installments
+           SET status = ?, actual_paid = ?, paid_at = COALESCE(paid_at, CURRENT_TIMESTAMP)
+           WHERE id = ?`,
+          [isPaid ? 'paid' : 'pending', isPaid ? amount : paidAfter, installment.id],
+          false
+        );
+
+        remainingPayment = roundCurrency(remainingPayment - applied);
+      }
+
+      if (remainingPayment > 0.009) {
+        throw new Error('تعذر إكمال السداد المبكر بسبب عدم تطابق جدول الأقساط مع قيمة العقد');
+      }
+
+      // 1. Update contract only after applying the capped outstanding amount.
       await database.run(
         `UPDATE contracts SET discount_amount = ?, status = 'completed' WHERE id = ?`,
         [safeDiscount, contractId],
-        false
-      );
-
-      // 2. Mark all unpaid/postponed installments as paid in one atomic statement
-      await database.run(
-        `UPDATE installments SET status = 'paid', actual_paid = amount, paid_at = COALESCE(paid_at, CURRENT_TIMESTAMP) WHERE contract_id = ? AND status != 'paid'`,
-        [contractId],
         false
       );
 
