@@ -89,7 +89,24 @@ test('discount covers the remaining installment without leaving it pending', () 
   assert.equal(settlement.paymentAmount, 400);
   assert.equal(settlement.safeDiscount, 100);
   assert.equal(updated.find((item) => item.id === 2).status, 'paid');
-  assert.equal(isContractComplete({ totalAmount: 1000, installments: updated }), true);
+  assert.equal(updated.find((item) => item.id === 2).actual_paid, 400);
+  assert.equal(updated.find((item) => item.id === 2).discount_amount, 100);
+  assert.equal(sumPaid(updated), 900);
+  assert.equal(isContractComplete({ totalAmount: 1000, installments: updated, discountAmount: 100 }), true);
+});
+
+test('a fully discounted installment is completed without inflating paid cash', () => {
+  const rows = [{ id: 1, amount: 500, status: 'pending', actual_paid: 0 }];
+
+  const settlement = calculateEarlySettlement(rows, 500, 500);
+  const updated = applyUpdates(rows, settlement.updates);
+
+  assert.equal(settlement.paymentAmount, 0);
+  assert.equal(updated[0].status, 'paid');
+  assert.equal(updated[0].actual_paid, 0);
+  assert.equal(updated[0].discount_amount, 500);
+  assert.equal(sumPaid(updated), 0);
+  assert.equal(isContractComplete({ totalAmount: 500, installments: updated, discountAmount: 500 }), true);
 });
 
 test('settlement rejects data that is already overpaid', () => {
