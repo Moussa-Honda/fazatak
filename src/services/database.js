@@ -1,6 +1,13 @@
 import { Capacitor } from '@capacitor/core';
 import { CapacitorSQLite, SQLiteConnection } from '@capacitor-community/sqlite';
 import { notifyDataChanged } from './dataEvents';
+import {
+  calculateEarlySettlement,
+  getPaidAmount,
+  getRemainingAmount,
+  isContractComplete,
+  roundCurrency
+} from './paymentRules';
 
 const DB_NAME = 'fazatak_db';
 const LEGACY_WHATSAPP_TEMPLATE = 'مرحباً [الاسم]، نذكركم بموعد دفع القسط بمبلغ [المبلغ] ريال بتاريخ [التاريخ]. شكراً لتعاونكم.';
@@ -50,24 +57,9 @@ const addLocalMonths = (dateInput, months) => {
   return next;
 };
 
-const roundCurrency = (value) => Math.round((Number(value) || 0) * 100) / 100;
-
 const paidAmountSql = (alias = '') => {
   const prefix = alias ? `${alias}.` : '';
   return `CASE WHEN ${prefix}status = 'paid' AND (${prefix}actual_paid IS NULL OR ${prefix}actual_paid = 0) THEN ${prefix}amount ELSE COALESCE(${prefix}actual_paid, 0) END`;
-};
-
-const getPaidAmount = (installment) => {
-  const actualPaid = Number(installment?.actual_paid || 0);
-  const status = String(installment?.status || '').trim().toLowerCase();
-  if (status === 'paid' && actualPaid <= 0) {
-    return Number(installment?.amount || 0);
-  }
-  return actualPaid;
-};
-
-const getRemainingAmount = (installment) => {
-  return Math.max(0, roundCurrency(Number(installment?.amount || 0) - getPaidAmount(installment)));
 };
 
 const buildInstallmentSchedule = ({ totalAmount, monthlyAmount, installmentCount, firstDueDate }) => {
@@ -1126,7 +1118,6 @@ export const contractService = {
     const contract = await this.getById(contractId);
     if (!contract) throw new Error('Contract not found: ' + contractId);
 
-    const contractAmount = roundCurrency(contract.total_amount);
     const requestedDiscount = Math.max(0, Number(discountAmount) || 0);
 
     let transactionStarted = false;
@@ -1139,51 +1130,22 @@ export const contractService = {
         [contractId]
       );
       const installments = installmentResult.values || [];
-      const totalPaid = roundCurrency(installments.reduce((sum, item) => sum + getPaidAmount(item), 0));
+      const settlement = calculateEarlySettlement(installments, contract.total_amount, requestedDiscount);
 
-      if (totalPaid > contractAmount + 0.009) {
-        throw new Error('لا يمكن تنفيذ السداد المبكر لأن المدفوع الحالي يتجاوز إجمالي العقد');
-      }
-
-      const outstandingBeforeDiscount = roundCurrency(Math.max(0, contractAmount - totalPaid));
-      const safeDiscount = roundCurrency(Math.min(requestedDiscount, outstandingBeforeDiscount));
-      let remainingPayment = roundCurrency(
-        Math.min(outstandingBeforeDiscount - safeDiscount, Math.max(0, contractAmount - totalPaid))
-      );
-
-      // A postponed installment is only the source of a replacement installment.
-      // Settling it as well would count the postponed amount twice.
-      for (const installment of installments) {
-        if (remainingPayment <= 0 || installment.status !== 'pending') continue;
-
-        const amount = roundCurrency(installment.amount);
-        const paidBefore = roundCurrency(getPaidAmount(installment));
-        const remainingInstallment = roundCurrency(Math.max(0, amount - paidBefore));
-        if (remainingInstallment <= 0) continue;
-
-        const applied = roundCurrency(Math.min(remainingPayment, remainingInstallment));
-        const paidAfter = roundCurrency(paidBefore + applied);
-        const isPaid = paidAfter + 0.009 >= amount;
-
+      for (const update of settlement.updates) {
         await database.run(
           `UPDATE installments
            SET status = ?, actual_paid = ?, paid_at = COALESCE(paid_at, CURRENT_TIMESTAMP)
            WHERE id = ?`,
-          [isPaid ? 'paid' : 'pending', isPaid ? amount : paidAfter, installment.id],
+          [update.status, update.actual_paid, update.id],
           false
         );
-
-        remainingPayment = roundCurrency(remainingPayment - applied);
-      }
-
-      if (remainingPayment > 0.009) {
-        throw new Error('تعذر إكمال السداد المبكر بسبب عدم تطابق جدول الأقساط مع قيمة العقد');
       }
 
       // 1. Update contract only after applying the capped outstanding amount.
       await database.run(
         `UPDATE contracts SET discount_amount = ?, status = 'completed' WHERE id = ?`,
-        [safeDiscount, contractId],
+        [settlement.safeDiscount, contractId],
         false
       );
 
@@ -1541,14 +1503,13 @@ export const installmentService = {
     const contract = await contractService.getById(installment.contract_id);
     if (contract) {
       const contractInstallments = await this.getByContractId(installment.contract_id);
-      const totalPaid = roundCurrency(
-        contractInstallments.reduce((sum, item) => sum + getPaidAmount(item), 0)
-      );
-      const contractTotal = roundCurrency(contract.total_amount);
-      const totalDue = Math.max(0, roundCurrency(contractTotal - Number(contract.discount_amount || 0)));
-      const isContractComplete = totalPaid + 0.009 >= totalDue;
+      const isComplete = isContractComplete({
+        totalAmount: contract.total_amount,
+        installments: contractInstallments,
+        discountAmount: contract.discount_amount
+      });
 
-      if (isContractComplete) {
+      if (isComplete) {
         await database.run(`UPDATE contracts SET status = 'completed' WHERE id = ?`, [contract.id]);
         notifyDataChanged({ scope: 'contracts', action: 'complete', id: contract.id, customerId: contract.customer_id });
 
