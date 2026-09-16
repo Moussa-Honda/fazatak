@@ -498,9 +498,12 @@ const ContractList = ({ customerId, isReadOnly, onRenewalRequest, themeColor = '
     <div className="flex flex-col h-full">
       <div className="flex-1 overflow-y-auto custom-scrollbar p-4 space-y-3">
         {contracts.map((contract) => {
-          const remaining = roundAmount((contract.total_amount || 0) - (contract.total_paid || 0));
-          const progress = contract.total_amount 
-            ? ((contract.total_paid || 0) / contract.total_amount) * 100 
+          const contractTotal = Number(contract.total_amount || 0);
+          const contractPaid = Number(contract.total_paid || 0);
+          const contractDiscount = Number(contract.discount_amount || 0);
+          const remaining = roundAmount(Math.max(0, contractTotal - contractPaid - contractDiscount));
+          const progress = contractTotal
+            ? ((Math.min(contractTotal, contractPaid + contractDiscount) / contractTotal) * 100)
             : 0;
 
           return (
@@ -676,10 +679,12 @@ const ContractList = ({ customerId, isReadOnly, onRenewalRequest, themeColor = '
                            const paidAmount = isSettledPostponed
                              ? roundAmount(inst.amount)
                              : getInstallmentPaidAmount(inst);
+                           const discountAmount = roundAmount(inst.discount_amount || 0);
+                           const coveredAmount = Math.min(roundAmount(inst.amount), paidAmount + discountAmount);
                            const remainingAmount = Math.max(0, getInstallmentRemaining(inst));
                            const isPaid = inst.statusGroup === 'paid';
                           const isPartial = !isPaid && paidAmount > 0;
-                          const primaryAmount = isPaid ? paidAmount : remainingAmount;
+                          const primaryAmount = isPaid ? coveredAmount : remainingAmount;
 
                           const showArchiveDivider = hasBothSections && inst.isBottomSection && !renderedArchiveDivider;
                           if (showArchiveDivider) {
@@ -720,9 +725,14 @@ const ContractList = ({ customerId, isReadOnly, onRenewalRequest, themeColor = '
                                   <span className="text-slate-500"> | أصل القسط: {formatAmount(inst.amount)}</span>
                                 </p>
                               )}
-                              {isPaid && paidAmount > 0 && paidAmount !== inst.amount && (
+                              {isPaid && paidAmount > 0 && discountAmount <= 0 && paidAmount !== inst.amount && (
                                 <p className="text-amber-400 text-xs">
                                   القسط الأصلي: {formatAmount(inst.amount)}
+                                </p>
+                              )}
+                              {isPaid && discountAmount > 0 && (
+                                <p className="text-amber-400 text-xs">
+                                  خصم التسوية: {formatAmount(discountAmount)}
                                 </p>
                               )}
                               <div className="text-slate-500 text-xs">
