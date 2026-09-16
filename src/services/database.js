@@ -372,7 +372,8 @@ const createTables = async () => {
        phone TEXT,
        is_deleted INTEGER DEFAULT 0,
        deleted_at DATETIME,
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );
 
     CREATE TABLE IF NOT EXISTS contracts (
@@ -543,6 +544,14 @@ const createTables = async () => {
 
   try {
     await db.execute('ALTER TABLE managers ADD COLUMN deleted_at DATETIME');
+  } catch {}
+
+  try {
+    await db.execute('ALTER TABLE managers ADD COLUMN updated_at DATETIME');
+  } catch {}
+
+  try {
+    await db.run(`UPDATE managers SET updated_at = COALESCE(updated_at, created_at)`);
   } catch {}
 
   // Ensure is_manually_flagged_as_overdue column exists for existing users
@@ -2227,6 +2236,15 @@ export const managerService = {
     return id;
   },
 
+  async update(id, manager) {
+    const database = await getDatabase();
+    await database.run(
+      `UPDATE managers SET name = ?, phone = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
+      [manager.name, manager.phone || null, id]
+    );
+    notifyDataChanged({ scope: 'managers', action: 'update', id });
+  },
+
   async getAllWithStats(includeDeleted = false) {
     const database = await getDatabase();
     const managerStateFilter = includeDeleted
@@ -2301,7 +2319,7 @@ export const managerService = {
   async delete(id) {
     const database = await getDatabase();
     await database.run(
-      `UPDATE managers SET is_deleted = 1, deleted_at = CURRENT_TIMESTAMP WHERE id = ?`,
+      `UPDATE managers SET is_deleted = 1, deleted_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
       [id]
     );
     notifyDataChanged({ scope: 'managers', action: 'delete', id });
@@ -2310,7 +2328,7 @@ export const managerService = {
   async restore(id) {
     const database = await getDatabase();
     await database.run(
-      `UPDATE managers SET is_deleted = 0, deleted_at = NULL WHERE id = ? AND is_deleted = 1`,
+      `UPDATE managers SET is_deleted = 0, deleted_at = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND is_deleted = 1`,
       [id]
     );
     notifyDataChanged({ scope: 'managers', action: 'restore', id });
