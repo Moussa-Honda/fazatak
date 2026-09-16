@@ -574,6 +574,94 @@ const createTables = async () => {
     CREATE INDEX IF NOT EXISTS idx_installments_status_due ON installments(status, due_date);
     CREATE INDEX IF NOT EXISTS idx_customer_month_statuses_month_customer ON customer_month_statuses(month_key, customer_id);
     CREATE INDEX IF NOT EXISTS idx_installment_postponements_installment_status ON installment_postponements(installment_id, status);
+
+    CREATE TRIGGER IF NOT EXISTS trg_touch_manager_customer_insert
+    AFTER INSERT ON customers
+    WHEN NEW.manager_id IS NOT NULL AND NEW.manager_id != 0
+    BEGIN
+      UPDATE managers SET updated_at = CURRENT_TIMESTAMP WHERE id = NEW.manager_id;
+    END;
+
+    CREATE TRIGGER IF NOT EXISTS trg_touch_manager_customer_update
+    AFTER UPDATE ON customers
+    BEGIN
+      UPDATE managers SET updated_at = CURRENT_TIMESTAMP WHERE id = NEW.manager_id;
+      UPDATE managers SET updated_at = CURRENT_TIMESTAMP WHERE id = OLD.manager_id AND OLD.manager_id IS NOT NEW.manager_id;
+    END;
+
+    CREATE TRIGGER IF NOT EXISTS trg_touch_manager_customer_delete
+    AFTER DELETE ON customers
+    WHEN OLD.manager_id IS NOT NULL AND OLD.manager_id != 0
+    BEGIN
+      UPDATE managers SET updated_at = CURRENT_TIMESTAMP WHERE id = OLD.manager_id;
+    END;
+
+    CREATE TRIGGER IF NOT EXISTS trg_touch_manager_contract_insert
+    AFTER INSERT ON contracts
+    BEGIN
+      UPDATE managers SET updated_at = CURRENT_TIMESTAMP
+      WHERE id = (SELECT manager_id FROM customers WHERE id = NEW.customer_id);
+    END;
+
+    CREATE TRIGGER IF NOT EXISTS trg_touch_manager_contract_update
+    AFTER UPDATE ON contracts
+    BEGIN
+      UPDATE managers SET updated_at = CURRENT_TIMESTAMP
+      WHERE id = (SELECT manager_id FROM customers WHERE id = NEW.customer_id);
+      UPDATE managers SET updated_at = CURRENT_TIMESTAMP
+      WHERE id = (SELECT manager_id FROM customers WHERE id = OLD.customer_id)
+        AND OLD.customer_id IS NOT NEW.customer_id;
+    END;
+
+    CREATE TRIGGER IF NOT EXISTS trg_touch_manager_contract_delete
+    AFTER DELETE ON contracts
+    BEGIN
+      UPDATE managers SET updated_at = CURRENT_TIMESTAMP
+      WHERE id = (SELECT manager_id FROM customers WHERE id = OLD.customer_id);
+    END;
+
+    CREATE TRIGGER IF NOT EXISTS trg_touch_manager_installment_insert
+    AFTER INSERT ON installments
+    BEGIN
+      UPDATE managers SET updated_at = CURRENT_TIMESTAMP
+      WHERE id = (
+        SELECT cu.manager_id
+        FROM contracts c
+        JOIN customers cu ON cu.id = c.customer_id
+        WHERE c.id = NEW.contract_id
+      );
+    END;
+
+    CREATE TRIGGER IF NOT EXISTS trg_touch_manager_installment_update
+    AFTER UPDATE ON installments
+    BEGIN
+      UPDATE managers SET updated_at = CURRENT_TIMESTAMP
+      WHERE id = (
+        SELECT cu.manager_id
+        FROM contracts c
+        JOIN customers cu ON cu.id = c.customer_id
+        WHERE c.id = NEW.contract_id
+      );
+      UPDATE managers SET updated_at = CURRENT_TIMESTAMP
+      WHERE id = (
+        SELECT cu.manager_id
+        FROM contracts c
+        JOIN customers cu ON cu.id = c.customer_id
+        WHERE c.id = OLD.contract_id
+      ) AND OLD.contract_id IS NOT NEW.contract_id;
+    END;
+
+    CREATE TRIGGER IF NOT EXISTS trg_touch_manager_installment_delete
+    AFTER DELETE ON installments
+    BEGIN
+      UPDATE managers SET updated_at = CURRENT_TIMESTAMP
+      WHERE id = (
+        SELECT cu.manager_id
+        FROM contracts c
+        JOIN customers cu ON cu.id = c.customer_id
+        WHERE c.id = OLD.contract_id
+      );
+    END;
   `);
 };
 
