@@ -6,11 +6,28 @@ import { formatPrivateAmount, usePrivacyMode } from '../hooks/usePrivacyMode';
 
 const managerNameCollator = new Intl.Collator('ar', { sensitivity: 'base', numeric: true });
 
+const formatManagerUpdatedAt = (value) => {
+  if (!value) return 'غير متوفر';
+  const rawValue = String(value);
+  const normalizedValue = rawValue.includes('T') ? rawValue : `${rawValue.replace(' ', 'T')}Z`;
+  const date = new Date(normalizedValue);
+  if (Number.isNaN(date.getTime())) return 'غير متوفر';
+  return date.toLocaleString('ar-SA', {
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit'
+  });
+};
+
 const ManagerList = ({ onSelectManager, onBack, filterType = 'all', isReadOnly = false, onRenewalRequest }) => {
   const [managers, setManagers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
   const [showDeleted, setShowDeleted] = useState(false);
+  const [editingManager, setEditingManager] = useState(null);
+  const [showManagerLastUpdated, setShowManagerLastUpdated] = useState(true);
   const privacyMode = usePrivacyMode();
 
   const isDeletedView = filterType !== 'overdue' && showDeleted;
@@ -19,7 +36,11 @@ const ManagerList = ({ onSelectManager, onBack, filterType = 'all', isReadOnly =
     setLoading(true);
     try {
       let data;
-      const sortCustomersSetting = await settingsService.get('sort_customers_alphabetically');
+      const [sortCustomersSetting, managerLastUpdatedSetting] = await Promise.all([
+        settingsService.get('sort_customers_alphabetically'),
+        settingsService.get('show_manager_last_updated')
+      ]);
+      setShowManagerLastUpdated(managerLastUpdatedSetting !== 'false');
       if (filterType === 'overdue') {
         data = await managerService.getManagersWithOverdueCount();
       } else if (showDeleted) {
@@ -64,6 +85,13 @@ const ManagerList = ({ onSelectManager, onBack, filterType = 'all', isReadOnly =
     loadManagers();
   };
 
+  const handleEdit = (manager, e) => {
+    e.stopPropagation();
+    if (isReadOnly) return onRenewalRequest?.();
+    setEditingManager(manager);
+    setShowModal(true);
+  };
+
   // Calculate totals for overdue section
   const totalStats = managers.reduce((acc, manager) => ({
     totalContracts: acc.totalContracts + (manager.total_contracts || 0),
@@ -96,6 +124,7 @@ const ManagerList = ({ onSelectManager, onBack, filterType = 'all', isReadOnly =
           <button
             onClick={() => {
               if (isReadOnly) return onRenewalRequest?.();
+              setEditingManager(null);
               setShowModal(true);
             }}
             className="w-10 h-10 bg-indigo-600 text-white rounded-xl flex items-center justify-center shadow-lg shadow-indigo-600/20 active:scale-95 transition-all cursor-pointer"
@@ -194,7 +223,21 @@ const ManagerList = ({ onSelectManager, onBack, filterType = 'all', isReadOnly =
                       </svg>
                       {manager.phone || 'بدون رقم'}
                     </p>
+                    {showManagerLastUpdated && (
+                      <p className="text-slate-500 text-[10px] font-medium mt-1">
+                        آخر تعديل: {formatManagerUpdatedAt(manager.updated_at || manager.created_at)}
+                      </p>
+                    )}
                   </div>
+                  {!isDeletedView && (
+                    <button
+                      onClick={(e) => handleEdit(manager, e)}
+                      className="p-2 text-slate-500 hover:text-indigo-400 transition-colors"
+                      title="تعديل المدير"
+                    >
+                      ✎
+                    </button>
+                  )}
                   <button 
                     onClick={(e) => isDeletedView ? handleRestore(manager, e) : handleDelete(manager, e)}
                     className={isDeletedView ? 'px-3 py-2 bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 rounded-xl text-xs font-bold hover:bg-emerald-500/20 transition-colors' : 'p-2 text-slate-600 hover:text-rose-500 transition-colors'}
@@ -257,6 +300,7 @@ const ManagerList = ({ onSelectManager, onBack, filterType = 'all', isReadOnly =
         isOpen={showModal}
         onClose={() => setShowModal(false)}
         onSave={loadManagers}
+        manager={editingManager}
       />
     </div>
   );
