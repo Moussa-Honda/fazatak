@@ -26,9 +26,7 @@ const ManagerModal = ({ isOpen, onClose, onSave, manager = null }) => {
     setLoading(true);
     try {
       if (manager) {
-        // We don't have update manager in service yet, let's add it if needed, 
-        // but for now let's just focus on creation as requested.
-        // I'll add update to managerService later.
+        await managerService.update(manager.id, formData);
       } else {
         await managerService.create(formData);
       }
