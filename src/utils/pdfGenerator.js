@@ -27,7 +27,8 @@ const today = () => fmtDate(new Date().toISOString());
 const getPaidAmount = (installment) => {
   const actualPaid = Number(installment?.actual_paid || 0);
   const status = String(installment?.status || '').trim().toLowerCase();
-  return status === 'paid' && actualPaid <= 0
+  const discountAmount = Number(installment?.discount_amount || 0);
+  return status === 'paid' && actualPaid <= 0 && discountAmount <= 0
     ? Number(installment?.amount || 0)
     : actualPaid;
 };
@@ -350,15 +351,16 @@ const buildContractHTML = async (customer, contract, s, managedBy = null, passed
   const rows = insts.map((inst, idx) => {
     const origAmount = Number(inst.amount || 0);
     const paidAmount = getPaidAmount(inst);
+    const discountAmount = Number(inst.discount_amount || 0);
     const isSettledPostponed = contract.status === 'completed' && inst.status === 'postponed';
     const displayPaidAmount = isSettledPostponed ? origAmount : paidAmount;
-    const remainingAmount = isSettledPostponed ? 0 : Math.max(0, origAmount - paidAmount);
-    const isPaid = isSettledPostponed || inst.status === 'paid' || (paidAmount > 0 && remainingAmount <= 0.009);
+    const remainingAmount = isSettledPostponed ? 0 : Math.max(0, origAmount - paidAmount - discountAmount);
+    const isPaid = isSettledPostponed || inst.status === 'paid' || (paidAmount + discountAmount > 0 && remainingAmount <= 0.009);
     const isPartial = !isPaid && paidAmount > 0 && remainingAmount > 0;
     const isPostponed = inst.status === 'postponed' && !isPaid;
 
     const cls = isPaid ? 'green' : isPostponed || isPartial ? 'amber' : 'red';
-    const lbl = isPaid ? 'مدفوع' : isPostponed ? 'مؤجل' : isPartial ? 'مدفوع جزئياً' : 'متبقي';
+    const lbl = isPaid ? discountAmount > 0 ? `مدفوع (خصم ${fmt(Math.round(discountAmount))} ر.س)` : 'مدفوع' : isPostponed ? 'مؤجل' : isPartial ? 'مدفوع جزئياً' : 'متبقي';
 
     return `<tr>
       <td style="font-weight:bold; color:#0f172a;">#${idx + 1} (${getArabicOrdinal(idx + 1)})</td>
