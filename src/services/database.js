@@ -59,7 +59,7 @@ const addLocalMonths = (dateInput, months) => {
 
 const paidAmountSql = (alias = '') => {
   const prefix = alias ? `${alias}.` : '';
-  return `CASE WHEN ${prefix}status = 'paid' AND (${prefix}actual_paid IS NULL OR ${prefix}actual_paid = 0) THEN ${prefix}amount ELSE COALESCE(${prefix}actual_paid, 0) END`;
+  return `CASE WHEN ${prefix}status = 'paid' AND (${prefix}actual_paid IS NULL OR ${prefix}actual_paid = 0) AND COALESCE(${prefix}discount_amount, 0) = 0 THEN ${prefix}amount ELSE COALESCE(${prefix}actual_paid, 0) END`;
 };
 
 const buildInstallmentSchedule = ({ totalAmount, monthlyAmount, installmentCount, firstDueDate }) => {
@@ -389,6 +389,7 @@ const createTables = async () => {
       due_date DATE NOT NULL,
       status TEXT DEFAULT 'pending' CHECK(status IN ('pending', 'paid', 'postponed')),
       actual_paid REAL DEFAULT 0,
+      discount_amount REAL DEFAULT 0,
       receipt_image_path TEXT,
       paid_at DATETIME,
       is_late INTEGER DEFAULT 0,
@@ -487,6 +488,10 @@ const createTables = async () => {
   
   await db.execute(schema);
 
+  try {
+    await db.execute('ALTER TABLE installments ADD COLUMN discount_amount REAL DEFAULT 0');
+  } catch {}
+
   // Existing installations do not have the operation type column yet.
   try {
     await db.execute(`ALTER TABLE portfolio_expenses ADD COLUMN entry_type TEXT NOT NULL DEFAULT 'expense'`);
@@ -508,7 +513,7 @@ const createTables = async () => {
   } catch {}
 
   try {
-    await db.run(`UPDATE installments SET actual_paid = amount WHERE status = 'paid' AND (actual_paid IS NULL OR actual_paid = 0)`);
+    await db.run(`UPDATE installments SET actual_paid = amount WHERE status = 'paid' AND (actual_paid IS NULL OR actual_paid = 0) AND COALESCE(discount_amount, 0) = 0`);
   } catch {}
 
   // إزالة إعدادات نظام تنبيهات الجهاز القديم (تمت استبداله بتنبيهات المتأخر/المستحق اليوم)
@@ -1135,9 +1140,9 @@ export const contractService = {
       for (const update of settlement.updates) {
         await database.run(
           `UPDATE installments
-           SET status = ?, actual_paid = ?, paid_at = COALESCE(paid_at, CURRENT_TIMESTAMP)
+           SET status = ?, actual_paid = ?, discount_amount = ?, paid_at = COALESCE(paid_at, CURRENT_TIMESTAMP)
            WHERE id = ?`,
-          [update.status, update.actual_paid, update.id],
+          [update.status, update.actual_paid, update.discount_amount, update.id],
           false
         );
       }
@@ -1471,12 +1476,12 @@ export const installmentService = {
 
       if (includeReceipt) {
         await database.run(
-          `UPDATE installments SET status = ?, actual_paid = ?, receipt_image_path = ?, paid_at = CURRENT_TIMESTAMP WHERE id = ?`,
+          `UPDATE installments SET status = ?, actual_paid = ?, discount_amount = 0, receipt_image_path = ?, paid_at = CURRENT_TIMESTAMP WHERE id = ?`,
           [isPaid ? 'paid' : 'pending', finalPaid, receiptPath, target.id]
         );
       } else {
         await database.run(
-          `UPDATE installments SET status = ?, actual_paid = ?, paid_at = CURRENT_TIMESTAMP WHERE id = ?`,
+          `UPDATE installments SET status = ?, actual_paid = ?, discount_amount = 0, paid_at = CURRENT_TIMESTAMP WHERE id = ?`,
           [isPaid ? 'paid' : 'pending', finalPaid, target.id]
         );
       }
@@ -1772,7 +1777,7 @@ export const installmentService = {
     if (!installment) return;
 
     // 1. Reset installment status
-    const sql = `UPDATE installments SET status = 'pending', actual_paid = 0, paid_at = NULL, receipt_image_path = NULL WHERE id = ?`;
+    const sql = `UPDATE installments SET status = 'pending', actual_paid = 0, discount_amount = 0, paid_at = NULL, receipt_image_path = NULL WHERE id = ?`;
     await database.run(sql, [id]);
 
     // 2. Reactivate the contract
