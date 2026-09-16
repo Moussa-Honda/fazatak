@@ -25,14 +25,18 @@ const getInstallmentRemaining = (installment) => {
   return Number(installment?.amount || 0) - paidAmount;
 };
 
-const isInstallmentPaidForDisplay = (installment) => {
+const isInstallmentPaidForDisplay = (installment, contractCompleted = false) => {
   const status = String(installment?.status || '').trim().toLowerCase();
-  return status === 'paid' || (Number(installment?.actual_paid || 0) > 0 && getInstallmentRemaining(installment) <= 0.009);
+  return (
+    (contractCompleted && status === 'postponed')
+    || status === 'paid'
+    || (Number(installment?.actual_paid || 0) > 0 && getInstallmentRemaining(installment) <= 0.009)
+  );
 };
 
-const isInstallmentPostponedForDisplay = (installment) => {
+const isInstallmentPostponedForDisplay = (installment, contractCompleted = false) => {
   const status = String(installment?.status || '').trim().toLowerCase();
-  return status === 'postponed' && !isInstallmentPaidForDisplay(installment);
+  return status === 'postponed' && !isInstallmentPaidForDisplay(installment, contractCompleted);
 };
 
 const getLocalDateText = (date = new Date()) => {
@@ -49,9 +53,9 @@ const isInstallmentLateForDisplay = (installment) => {
     && String(installment?.due_date || '') < getLocalDateText();
 };
 
-const getInstallmentStatusGroup = (installment) => {
-  if (isInstallmentPaidForDisplay(installment)) return 'paid';
-  if (isInstallmentPostponedForDisplay(installment)) return 'postponed';
+const getInstallmentStatusGroup = (installment, contractCompleted = false) => {
+  if (isInstallmentPaidForDisplay(installment, contractCompleted)) return 'paid';
+  if (isInstallmentPostponedForDisplay(installment, contractCompleted)) return 'postponed';
   return 'active'; // pending or partially paid
 };
 
@@ -64,7 +68,7 @@ const getInstallmentPaidAmount = (installment) => {
   return Math.max(0, actualPaid);
 };
 
-const getInstallmentsForDisplay = (items = []) => {
+const getInstallmentsForDisplay = (items = [], contractCompleted = false) => {
   const scheduleNumbers = new Map(
     [...items]
       .sort((a, b) => {
@@ -88,7 +92,7 @@ const getInstallmentsForDisplay = (items = []) => {
   const paid = [];
 
   for (const item of items) {
-    const group = getInstallmentStatusGroup(item);
+    const group = getInstallmentStatusGroup(item, contractCompleted);
     if (group === 'active') {
       active.push(item);
     } else if (group === 'postponed') {
@@ -108,8 +112,8 @@ const getInstallmentsForDisplay = (items = []) => {
   return [...active, ...postponed, ...paid].map((item) => ({
     ...item,
     scheduleNumber: scheduleNumbers.get(item.id),
-    statusGroup: getInstallmentStatusGroup(item),
-    isBottomSection: getInstallmentStatusGroup(item) !== 'active'
+    statusGroup: getInstallmentStatusGroup(item, contractCompleted),
+    isBottomSection: getInstallmentStatusGroup(item, contractCompleted) !== 'active'
   }));
 };
 
@@ -456,6 +460,7 @@ const ContractList = ({ customerId, isReadOnly, onRenewalRequest, themeColor = '
   };
 
   const getStatusText = (status, inst = null) => {
+    if (inst?.statusGroup === 'paid') return 'مدفوع';
     if (inst && isInstallmentPaidForDisplay(inst)) return 'مدفوع';
     if (status === 'paid') return 'مدفوع';
     if (status === 'postponed') return 'مؤجل';
@@ -657,16 +662,22 @@ const ContractList = ({ customerId, isReadOnly, onRenewalRequest, themeColor = '
                     
                     <div className="flex flex-col gap-2">
                       {(() => {
-                        const displayList = getInstallmentsForDisplay(installments[contract.id]);
+                         const displayList = getInstallmentsForDisplay(
+                           installments[contract.id],
+                           contract.status === 'completed'
+                         );
                         const activeCount = displayList.filter(i => !i.isBottomSection).length;
                         const bottomCount = displayList.filter(i => i.isBottomSection).length;
                         const hasBothSections = activeCount > 0 && bottomCount > 0;
                         let renderedArchiveDivider = false;
 
                         return displayList.map((inst) => {
-                          const paidAmount = getInstallmentPaidAmount(inst);
-                          const remainingAmount = Math.max(0, getInstallmentRemaining(inst));
-                          const isPaid = isInstallmentPaidForDisplay(inst);
+                           const isSettledPostponed = contract.status === 'completed' && inst.status === 'postponed';
+                           const paidAmount = isSettledPostponed
+                             ? roundAmount(inst.amount)
+                             : getInstallmentPaidAmount(inst);
+                           const remainingAmount = Math.max(0, getInstallmentRemaining(inst));
+                           const isPaid = inst.statusGroup === 'paid';
                           const isPartial = !isPaid && paidAmount > 0;
                           const primaryAmount = isPaid ? paidAmount : remainingAmount;
 
@@ -810,7 +821,7 @@ const ContractList = ({ customerId, isReadOnly, onRenewalRequest, themeColor = '
                               </div>
                             )}
 
-                            {inst.status === 'postponed' && (
+                             {inst.status === 'postponed' && contract.status !== 'completed' && (
                               <button
                                 onClick={(e) => {
                                   e.stopPropagation();
