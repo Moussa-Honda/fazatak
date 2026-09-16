@@ -350,8 +350,10 @@ const buildContractHTML = async (customer, contract, s, managedBy = null, passed
   const rows = insts.map((inst, idx) => {
     const origAmount = Number(inst.amount || 0);
     const paidAmount = getPaidAmount(inst);
-    const remainingAmount = Math.max(0, origAmount - paidAmount);
-    const isPaid = inst.status === 'paid' || (paidAmount > 0 && remainingAmount <= 0.009);
+    const isSettledPostponed = contract.status === 'completed' && inst.status === 'postponed';
+    const displayPaidAmount = isSettledPostponed ? origAmount : paidAmount;
+    const remainingAmount = isSettledPostponed ? 0 : Math.max(0, origAmount - paidAmount);
+    const isPaid = isSettledPostponed || inst.status === 'paid' || (paidAmount > 0 && remainingAmount <= 0.009);
     const isPartial = !isPaid && paidAmount > 0 && remainingAmount > 0;
     const isPostponed = inst.status === 'postponed' && !isPaid;
 
@@ -362,7 +364,7 @@ const buildContractHTML = async (customer, contract, s, managedBy = null, passed
       <td style="font-weight:bold; color:#0f172a;">#${idx + 1} (${getArabicOrdinal(idx + 1)})</td>
       <td style="font-family:Arial,sans-serif; direction:ltr; color:#0f172a;">${fmtDate(inst.due_date)}</td>
       <td style="font-weight:bold; color:#0f172a;">${fmt(Math.round(origAmount))} ر.س</td>
-      <td class="green" style="font-weight:bold;">${fmt(Math.round(paidAmount))} ر.س</td>
+       <td class="green" style="font-weight:bold;">${fmt(Math.round(displayPaidAmount))} ر.س</td>
       <td class="${remainingAmount > 0 ? 'red' : 'green'}" style="font-weight:bold;">${fmt(Math.round(remainingAmount))} ر.س</td>
       <td class="${cls}" style="font-weight:bold;">${lbl}</td>
     </tr>`;
