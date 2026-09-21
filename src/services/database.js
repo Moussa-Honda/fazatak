@@ -513,7 +513,7 @@ const createTables = async () => {
   } catch {}
 
   try {
-    await db.run(`UPDATE installments SET actual_paid = amount WHERE status = 'paid' AND (actual_paid IS NULL OR actual_paid = 0)`);
+    await db.run(`UPDATE installments SET actual_paid = amount WHERE status = 'paid' AND (actual_paid IS NULL OR actual_paid = 0) AND COALESCE(discount_amount, 0) = 0`);
   } catch {}
 
   // إزالة إعدادات نظام تنبيهات الجهاز القديم (تمت استبداله بتنبيهات المتأخر/المستحق اليوم)
