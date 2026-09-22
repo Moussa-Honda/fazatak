@@ -202,6 +202,29 @@ function App() {
     setIsAppLocked(false);
   };
 
+  const handleLicenseReactivated = (_key, licenseExpiry) => {
+    const expirySeconds = Number(licenseExpiry);
+    if (!Number.isFinite(expirySeconds) || expirySeconds * 1000 < Date.now()) {
+      checkAppLicense();
+      return;
+    }
+
+    const user = authService.getCurrentUser();
+    if (user) {
+      const updatedUser = {
+        ...user,
+        subscription_status: 'active',
+        subscription_expiry: new Date(expirySeconds * 1000).toISOString()
+      };
+      authService.setCurrentUser(updatedUser);
+      setCurrentUser(updatedUser);
+    }
+
+    setIsLicensed(true);
+    setIsExpired(false);
+    setExpiry(expirySeconds);
+  };
+
   if (isLoading) {
     return (
       <div className="flex items-center justify-center h-full bg-slate-900">
@@ -233,14 +256,14 @@ function App() {
   }
 
   return (
-    <Dashboard
-      currentUser={currentUser}
-      decryptionKey={decryptionKey}
-      isExpired={isExpired}
-      expiry={expiry}
-      onReActivate={checkAppLicense}
-      onLogout={handleLogout}
-    />
+      <Dashboard
+        currentUser={currentUser}
+        decryptionKey={decryptionKey}
+        isExpired={isExpired}
+        expiry={expiry}
+        onReActivate={handleLicenseReactivated}
+        onLogout={handleLogout}
+      />
   );
 }
 
