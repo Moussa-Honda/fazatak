@@ -33,6 +33,30 @@ const getWebDeviceId = () => {
   return id;
 };
 
+const getStoredWebLicenseStatus = () => {
+  try {
+    if (typeof localStorage === 'undefined') return null;
+
+    const stored = localStorage.getItem(WEB_LICENSE_KEY);
+    if (!stored) return null;
+
+    const data = JSON.parse(stored);
+    const now = Math.floor(Date.now() / 1000);
+    if (!data.expiry || now > data.expiry) return null;
+
+    data.lastSeen = now;
+    localStorage.setItem(WEB_LICENSE_KEY, JSON.stringify(data));
+
+    return {
+      isValid: true,
+      expiry: data.expiry,
+      key: data.key || 'DUMMY_KEY'
+    };
+  } catch {
+    return null;
+  }
+};
+
 export const licenseService = {
   /**
    * Returns the unique device identifier
@@ -142,6 +166,10 @@ export const licenseService = {
       }
     }
 
+    // A locally activated device license must override an expired cloud session.
+    const localLicense = getStoredWebLicenseStatus();
+    if (localLicense) return localLicense;
+
     // 1. First check if a user is logged in via Phone Account
     try {
       const authRaw = localStorage.getItem('fazatak_auth_user');
@@ -169,34 +197,7 @@ export const licenseService = {
       }
     }
 
-    // 2. Fall back to legacy web license status check
-    try {
-      const stored = localStorage.getItem(WEB_LICENSE_KEY);
-      if (!stored) {
-        return { isValid: false, error: 'ERR_NO_LICENSE' };
-      }
-
-      const data = JSON.parse(stored);
-      const now = Math.floor(Date.now() / 1000);
-
-      if (!data.expiry || now > data.expiry) {
-        throw new Error('ERR_EXPIRED');
-      }
-
-      data.lastSeen = now;
-      localStorage.setItem(WEB_LICENSE_KEY, JSON.stringify(data));
-
-      return {
-        isValid: true,
-        expiry: data.expiry,
-        key: data.key || 'DUMMY_KEY'
-      };
-    } catch (err) {
-      if (err.message && err.message.includes('ERR_EXPIRED')) {
-        throw err;
-      }
-      return { isValid: false, error: err.message };
-    }
+    return { isValid: false, error: 'ERR_NO_LICENSE' };
   }
 };
 
