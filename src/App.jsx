@@ -127,11 +127,18 @@ function App() {
         setCurrentUser(user);
         setIsAppLocked(authService.isAppLockEnabled(user.phone));
         const expiryMs = new Date(user.subscription_expiry).getTime();
-        const hasExpired = expiryMs < Date.now() || user.subscription_status === 'expired';
+        const localLicense = await licenseService.checkLicenseStatus().catch(() => null);
+        const localLicenseExpiry = Number(localLicense?.expiry);
+        const hasLocalLicense = localLicense?.isValid === true
+          && Number.isFinite(localLicenseExpiry)
+          && localLicenseExpiry * 1000 >= Date.now();
+        const hasExpired = hasLocalLicense
+          ? false
+          : expiryMs < Date.now() || user.subscription_status === 'expired';
 
         setIsLicensed(true);
         setIsExpired(hasExpired);
-        setExpiry(Math.floor(expiryMs / 1000));
+        setExpiry(hasLocalLicense ? localLicenseExpiry : Math.floor(expiryMs / 1000));
         setDecryptionKey('FAZATAK_SECURE_KEY');
 
         // فحص واسترجاع ذكي فوري إذا كانت المعاملات غير موجودة محلياً قبل فتح الواجهة
@@ -146,6 +153,11 @@ function App() {
           if (updated && updated.subscription_expiry) {
             setCurrentUser(updated);
             const updatedExpMs = new Date(updated.subscription_expiry).getTime();
+            if (hasLocalLicense) {
+              setExpiry(localLicenseExpiry);
+              setIsExpired(false);
+              return;
+            }
             setExpiry(Math.floor(updatedExpMs / 1000));
             const stillExpired = updatedExpMs < Date.now() || updated.subscription_status === 'expired';
             setIsExpired(stillExpired);
