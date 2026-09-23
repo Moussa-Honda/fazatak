@@ -1,10 +1,10 @@
 apply plugin: 'com.android.application'
 
 android {
-    namespace = "com.installment.app"
+    namespace = "com.aqsaati.installments"
     compileSdk = rootProject.ext.compileSdkVersion
     defaultConfig {
-        applicationId "com.installment.app"
+        applicationId "com.aqsaati.installments"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
         versionCode 41
