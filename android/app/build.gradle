@@ -1,5 +1,12 @@
 apply plugin: 'com.android.application'
 
+def releaseKeystorePath = System.getenv('ANDROID_KEYSTORE_PATH')
+def releaseKeystoreFile = releaseKeystorePath ? file(releaseKeystorePath) : null
+def releaseSigningConfigured = releaseKeystoreFile?.exists() &&
+        System.getenv('ANDROID_KEYSTORE_PASSWORD') &&
+        System.getenv('ANDROID_KEY_ALIAS') &&
+        System.getenv('ANDROID_KEY_PASSWORD')
+
 android {
     namespace = "com.aqsaati.installments"
     compileSdk = rootProject.ext.compileSdkVersion
@@ -24,26 +31,27 @@ android {
             path "src/main/cpp/CMakeLists.txt"
         }
     }
+    signingConfigs {
+        release {
+            if (releaseSigningConfigured) {
+                storeFile releaseKeystoreFile
+                storePassword System.getenv('ANDROID_KEYSTORE_PASSWORD')
+                keyAlias System.getenv('ANDROID_KEY_ALIAS')
+                keyPassword System.getenv('ANDROID_KEY_PASSWORD')
+                storeType 'pkcs12'
+            }
+        }
+    }
     buildTypes {
         release {
             minifyEnabled true
             shrinkResources true
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
-            // To enable automatic signing, uncomment the following line after configuring signingConfigs:
-            // signingConfig signingConfigs.release
+            if (releaseSigningConfigured) {
+                signingConfig signingConfigs.release
+            }
         }
     }
-    // Configuration placeholder for App Signing
-    /*
-    signingConfigs {
-        release {
-            storeFile file('my-release-key.keystore')
-            storePassword 'your-password'
-            keyAlias 'your-alias'
-            keyPassword 'your-password'
-        }
-    }
-    */
 }
 
 repositories {
