@@ -1,13 +1,11 @@
 apply plugin: 'com.android.application'
 
-
 def releaseKeystorePath = System.getenv('ANDROID_KEYSTORE_PATH')
 def releaseKeystoreFile = releaseKeystorePath ? file(releaseKeystorePath) : null
 def releaseSigningConfigured = releaseKeystoreFile?.exists() &&
         System.getenv('ANDROID_KEYSTORE_PASSWORD') &&
         System.getenv('ANDROID_KEY_ALIAS') &&
         System.getenv('ANDROID_KEY_PASSWORD')
-
 
 android {
     namespace = "com.aqsaati.installments"
@@ -17,41 +15,6 @@ android {
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
         versionCode 43
-        versionName "0.0.0"
-        testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
-        aaptOptions {
-             ignoreAssetsPattern = '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
-        }
-        externalNativeBuild {
-            cmake {
-                cppFlags "-std=c++17 -Wall -Werror -fstack-protector-all"
-            }
-        }
-    }
-    externalNativeBuild {
-        cmake {
-            path "src/main/cpp/CMakeLists.txt"
-        }
-    }
-    signingConfigs {
-        release {
-            if (releaseSigningConfigured) {apply plugin: 'com.android.application'
-
-def releaseKeystorePath = System.getenv('ANDROID_KEYSTORE_PATH')
-def releaseKeystoreFile = releaseKeystorePath ? file(releaseKeystorePath) : null
-def releaseSigningConfigured = releaseKeystoreFile?.exists() &&
-        System.getenv('ANDROID_KEYSTORE_PASSWORD') &&
-        System.getenv('ANDROID_KEY_ALIAS') &&
-        System.getenv('ANDROID_KEY_PASSWORD')
-
-android {
-    namespace = "com.aqsaati.installments"
-    compileSdk = rootProject.ext.compileSdkVersion
-    defaultConfig {
-        applicationId "com.aqsaati.installments"
-        minSdkVersion rootProject.ext.minSdkVersion
-        targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 42
         versionName "0.0.0"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
