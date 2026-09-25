@@ -779,7 +779,7 @@ const Settings = ({ onSettingsChange, onLicenseRenewed, currentUser, onLogout, i
 
           <div className="bg-emerald-500/10 border border-emerald-500/25 rounded-xl p-4 flex items-center justify-between gap-3">
             <div>
-              <p className="text-white text-sm font-bold">تواصل معنا للتجديد</p>
+               <p className="text-white text-sm font-bold">رقم دعم التجديد</p>
               <p className="text-emerald-300 text-sm font-mono mt-1" dir="ltr">{SUPPORT_PHONE_DISPLAY}</p>
             </div>
             <button
