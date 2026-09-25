@@ -332,10 +332,10 @@ const Dashboard = ({ isExpired, expiry, onReActivate, currentUser, onLogout }) =
       custodyId: selectedCustody?.id
     });
 
-    if (currentUser?.phone) {
-      cloudSyncService.syncWithCloud(currentUser.phone).catch(() => {});
+    if (currentUser?.account_number) {
+      cloudSyncService.syncWithCloud(currentUser.account_number, currentUser.phone).catch(() => {});
     }
-  }, [activeTab, selectedCustomer?.id, selectedManager?.id, selectedCustody?.id, currentUser?.phone]);
+  }, [activeTab, selectedCustomer?.id, selectedManager?.id, selectedCustody?.id, currentUser?.account_number, currentUser?.phone]);
 
   const getRemainingDays = () => {
     if (isExpired) return 'منتهي (عرض فقط)';
