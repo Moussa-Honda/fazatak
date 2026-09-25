@@ -38,9 +38,9 @@ function generateKeyPair() {
 }
 
 /**
- * Signs a license payload for a specific device
+ * Signs a license payload for a specific account
  */
-function generateLicense(deviceId, days) {
+function generateLicense(accountNumber, days) {
   if (!fs.existsSync(KEY_FILE)) {
     console.log('❌ Key file not found. Generating new keys first...');
     generateKeyPair();
@@ -52,7 +52,7 @@ function generateLicense(deviceId, days) {
   const expiry = now + (days * 24 * 60 * 60);
 
   const payload = {
-    d: deviceId,    // Device ID
+    a: accountNumber, // Account number
     e: expiry,      // Expiry timestamp
     f: ['full'],    // Features
     v: 1,           // Version
@@ -77,7 +77,7 @@ function generateLicense(deviceId, days) {
   
   console.log('\n🚀 LICENSE GENERATED SUCCESSFULLY!');
   console.log('--------------------------------------------------');
-  console.log(`Device ID:  ${deviceId}`);
+  console.log(`Account number: ${accountNumber}`);
   console.log(`Expiry:     ${new Date(expiry * 1000).toLocaleString()}`);
   console.log('--------------------------------------------------');
   console.log('Activation Code (COPY THIS):');
@@ -92,15 +92,15 @@ const command = args[0];
 if (command === 'init') {
   generateKeyPair();
 } else if (command === 'gen') {
-  const device = args[1];
+  const accountNumber = args[1];
   const days = parseInt(args[2]) || 365;
-  if (!device) {
-    console.log('Usage: node generate_license.js gen <DEVICE_ID> [days]');
+  if (!accountNumber) {
+    console.log('Usage: node generate_license.js gen <ACCOUNT_NUMBER> [days]');
   } else {
-    generateLicense(device, days);
+    generateLicense(accountNumber, days);
   }
 } else {
   console.log('Commands:');
   console.log('  node generate_license.js init            - Generate new key pair');
-  console.log('  node generate_license.js gen <ID> [days] - Generate activation code');
+  console.log('  node generate_license.js gen <ACCOUNT_NUMBER> [days] - Generate activation code');
 }
