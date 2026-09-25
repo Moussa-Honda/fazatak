@@ -122,9 +122,11 @@ function App() {
   const checkAppLicense = async () => {
     try {
       // 1. التحقق أولاً من جلسة العميل المربوطة برقم الهاتف
-      const user = authService.getCurrentUser();
+      const cachedUser = authService.getCurrentUser();
 
-      if (user && user.phone) {
+      if (cachedUser && cachedUser.phone) {
+        // Fetch the central account entitlement before applying local/device fallbacks.
+        const user = await authService.refreshSubscription().catch(() => cachedUser);
         setCurrentUser(user);
         setIsAppLocked(authService.isAppLockEnabled(user.phone));
         const expiryMs = new Date(user.subscription_expiry).getTime();
@@ -135,13 +137,12 @@ function App() {
           && localLicenseExpiry * 1000 >= Date.now();
         const playStatus = await billingService.getStatus().catch(() => null);
         const hasPlaySubscription = playStatus?.active === true;
-        const hasExpired = hasLocalLicense || hasPlaySubscription
-          ? false
-          : expiryMs < Date.now() || user.subscription_status === 'expired';
+        const hasCloudSubscription = expiryMs >= Date.now() && user.subscription_status !== 'expired';
+        const hasExpired = !(hasCloudSubscription || hasLocalLicense || hasPlaySubscription);
 
         setIsLicensed(true);
         setIsExpired(hasExpired);
-        setExpiry(hasLocalLicense ? localLicenseExpiry : hasPlaySubscription ? null : Math.floor(expiryMs / 1000));
+        setExpiry(hasCloudSubscription ? Math.floor(expiryMs / 1000) : hasLocalLicense ? localLicenseExpiry : null);
         setDecryptionKey('FAZATAK_SECURE_KEY');
 
         // فحص واسترجاع ذكي فوري إذا كانت المعاملات غير موجودة محلياً قبل فتح الواجهة
@@ -156,13 +157,9 @@ function App() {
           if (updated && updated.subscription_expiry) {
             setCurrentUser(updated);
             const updatedExpMs = new Date(updated.subscription_expiry).getTime();
-            if (hasLocalLicense || hasPlaySubscription) {
-              setExpiry(hasLocalLicense ? localLicenseExpiry : null);
-              setIsExpired(false);
-              return;
-            }
-            setExpiry(Math.floor(updatedExpMs / 1000));
-            const stillExpired = updatedExpMs < Date.now() || updated.subscription_status === 'expired';
+            const hasUpdatedCloudSubscription = updatedExpMs >= Date.now() && updated.subscription_status !== 'expired';
+            const stillExpired = !(hasUpdatedCloudSubscription || hasLocalLicense || hasPlaySubscription);
+            setExpiry(hasUpdatedCloudSubscription ? Math.floor(updatedExpMs / 1000) : hasLocalLicense ? localLicenseExpiry : null);
             setIsExpired(stillExpired);
           }
         }).catch(() => {});
