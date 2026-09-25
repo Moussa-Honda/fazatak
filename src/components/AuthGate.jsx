@@ -135,8 +135,8 @@ const AuthGate = ({ onAuthenticated, isExpired = false, initialUser = null }) =>
   };
 
   const handleSupportWhatsApp = () => {
-    const phone = currentUser?.phone || loginPhone || '';
-    const message = `السلام عليكم، أريد تجديد اشتراك تطبيق أقساطي لرقم الحساب: ${phone}`;
+    const accountNumber = currentUser?.account_number || '';
+    const message = `السلام عليكم، أريد تجديد اشتراك تطبيق أقساطي لرقم الحساب: ${accountNumber}`;
     window.open(`https://wa.me/${SUPPORT_WHATSAPP_PHONE}?text=${encodeURIComponent(message)}`, '_blank');
   };
 
@@ -148,7 +148,7 @@ const AuthGate = ({ onAuthenticated, isExpired = false, initialUser = null }) =>
     try {
       const result = await licenseService.activateLicense(activationCode.trim());
       if (result.success) {
-        await authService.activateOrExtendSubscription(30);
+        await authService.activateOrExtendSubscription(result.durationDays);
         const updatedUser = authService.getCurrentUser();
         setSuccessMsg('تم تجديد الاشتراك بنجاح!');
         setTimeout(() => {
@@ -156,7 +156,11 @@ const AuthGate = ({ onAuthenticated, isExpired = false, initialUser = null }) =>
         }, 1200);
       }
     } catch (err) {
-      setError('كود التفعيل غير صحيح أو منتهي الصلاحية');
+      if (err.message === 'ERR_ACCOUNT_NUMBER_REQUIRED') {
+        setError('رقم الحساب غير متاح. يرجى تحديث التطبيق أو تشغيل ترقية قاعدة البيانات أولاً.');
+      } else {
+        setError('كود التفعيل غير صحيح أو منتهي الصلاحية');
+      }
     } finally {
       setLoading(false);
     }
