@@ -1,11 +1,11 @@
 import { Capacitor, registerPlugin } from '@capacitor/core';
+import { authService } from './authService';
 
 const License = registerPlugin('License');
 const SECRET_SALT = 'NAYEF_FAZATK_2026_SECURITY_SALT';
-const WEB_DEVICE_ID_KEY = 'fazatak_web_device_id';
 const WEB_LICENSE_KEY = 'fazatak_license_data';
+const ACCOUNT_NUMBER_LENGTH = 8;
 
-// Helper to hash using crypto.subtle (SHA-256) exactly matching Android / Generator logic
 const generateNumericHash = async (input) => {
   try {
     const encoder = new TextEncoder();
@@ -23,26 +23,25 @@ const generateNumericHash = async (input) => {
   }
 };
 
-const getWebDeviceId = () => {
-  let id = localStorage.getItem(WEB_DEVICE_ID_KEY);
-  if (!id || id.length !== 6) {
-    // Generate stable 6-digit numeric device ID
-    id = String(Math.floor(100000 + Math.random() * 900000));
-    localStorage.setItem(WEB_DEVICE_ID_KEY, id);
-  }
-  return id;
-};
+const normalizeAccountNumber = (value) => String(value || '')
+  .trim()
+  .replace(/[\u0660-\u0669]/g, d => d.charCodeAt(0) - 1632)
+  .replace(/[\u06F0-\u06F9]/g, d => d.charCodeAt(0) - 1776);
 
-const getStoredWebLicenseStatus = () => {
+const getCurrentAccountNumber = () => normalizeAccountNumber(authService.getCurrentUser()?.account_number);
+
+const isValidAccountNumber = (value) => new RegExp(`^\\d{${ACCOUNT_NUMBER_LENGTH}}$`).test(value);
+
+const getStoredWebLicenseStatus = (accountNumber) => {
   try {
-    if (typeof localStorage === 'undefined') return null;
+    if (typeof localStorage === 'undefined' || !accountNumber) return null;
 
     const stored = localStorage.getItem(WEB_LICENSE_KEY);
     if (!stored) return null;
 
     const data = JSON.parse(stored);
     const now = Math.floor(Date.now() / 1000);
-    if (!data.expiry || now > data.expiry) return null;
+    if (data.accountNumber !== accountNumber || !data.expiry || now > data.expiry) return null;
 
     data.lastSeen = now;
     localStorage.setItem(WEB_LICENSE_KEY, JSON.stringify(data));
@@ -50,7 +49,8 @@ const getStoredWebLicenseStatus = () => {
     return {
       isValid: true,
       expiry: data.expiry,
-      key: data.key || 'DUMMY_KEY'
+      key: data.key || 'DUMMY_KEY',
+      accountNumber
     };
   } catch {
     return null;
@@ -58,143 +58,131 @@ const getStoredWebLicenseStatus = () => {
 };
 
 export const licenseService = {
-  /**
-   * Returns the unique device identifier
-   */
-  async getDeviceId() {
-    if (!Capacitor.isNativePlatform()) {
-      return getWebDeviceId();
-    }
-
-    try {
-      const { deviceId } = await License.getDeviceId();
-      return deviceId;
-    } catch (err) {
-      console.error('[LicenseService] Native getDeviceId failed, falling back to web ID:', err);
-      return getWebDeviceId();
-    }
+  getAccountNumber() {
+    return getCurrentAccountNumber();
   },
 
-  /**
-   * Attempts to activate the app with the provided code
-   */
-  async activateLicense(code) {
-    if (!code) {
-      throw new Error('ERR_MISSING_CODE');
+  async activateLicense(code, accountNumber = getCurrentAccountNumber()) {
+    if (!code) throw new Error('ERR_MISSING_CODE');
+
+    const cleanAccountNumber = normalizeAccountNumber(accountNumber);
+    if (!isValidAccountNumber(cleanAccountNumber)) {
+      throw new Error('ERR_ACCOUNT_NUMBER_REQUIRED');
     }
 
-    // Standardize Arabic-Indic digits to Western digits
     const cleanCode = String(code).trim()
       .replace(/[\u0660-\u0669]/g, d => d.charCodeAt(0) - 1632)
       .replace(/[\u06F0-\u06F9]/g, d => d.charCodeAt(0) - 1776);
 
-    if (cleanCode.length !== 9) {
-      throw new Error('ERR_INVALID_FORMAT');
-    }
+    if (cleanCode.length !== 9) throw new Error('ERR_INVALID_FORMAT');
 
     if (Capacitor.isNativePlatform()) {
       try {
-        return await License.activateLicense({ code: cleanCode });
+        return await License.activateLicense({
+          code: cleanCode,
+          accountNumber: cleanAccountNumber
+        });
       } catch (err) {
-        // Fall back to web algorithm if native plugin fails
-        console.warn('[LicenseService] Native activateLicense failed, trying web verification:', err);
+        console.warn('[LicenseService] Native activateLicense failed, trying account verification:', err);
       }
     }
 
-    // Web verification matching tools/license_web_generator.html
-    const deviceId = await this.getDeviceId();
     const durations = ['30', '90', '180', '365', '9999'];
     const typeDigit = cleanCode.substring(0, 1);
     const codeHash = cleanCode.substring(1);
-
     let matchedDuration = null;
-    for (const d of durations) {
-      const expectedHash = await generateNumericHash(deviceId + d + SECRET_SALT);
-      if (expectedHash === codeHash) {
-        let expectedType = '0';
-        if (d === '30') expectedType = '1';
-        else if (d === '90') expectedType = '3';
-        else if (d === '180') expectedType = '6';
-        else if (d === '365') expectedType = '9';
 
-        if (typeDigit === expectedType) {
-          matchedDuration = d;
-          break;
-        }
+    for (const duration of durations) {
+      const expectedHash = await generateNumericHash(cleanAccountNumber + duration + SECRET_SALT);
+      if (expectedHash !== codeHash) continue;
+
+      const expectedType = duration === '30'
+        ? '1'
+        : duration === '90'
+          ? '3'
+          : duration === '180'
+            ? '6'
+            : duration === '365'
+              ? '9'
+              : '0';
+
+      if (typeDigit === expectedType) {
+        matchedDuration = duration;
+        break;
       }
     }
 
-    if (!matchedDuration) {
-      throw new Error('ERR_WRONG_CODE');
-    }
+    if (!matchedDuration) throw new Error('ERR_WRONG_CODE');
 
     const now = Math.floor(Date.now() / 1000);
-    let expiry;
-    if (matchedDuration === '9999') {
-      expiry = 2147483647; // Lifetime
-    } else {
-      expiry = now + (Number(matchedDuration) * 24 * 60 * 60);
+    let currentExpiry = 0;
+    try {
+      const stored = JSON.parse(localStorage.getItem(WEB_LICENSE_KEY) || 'null');
+      if (stored?.accountNumber === cleanAccountNumber) currentExpiry = Number(stored.expiry) || 0;
+    } catch {
+      currentExpiry = 0;
     }
 
-    const keySource = deviceId + cleanCode + SECRET_SALT;
+    const baseTime = Math.max(now, currentExpiry);
+    const expiry = matchedDuration === '9999'
+      ? 2147483647
+      : baseTime + (Number(matchedDuration) * 24 * 60 * 60);
+    const keySource = cleanAccountNumber + cleanCode + SECRET_SALT;
     const derivedKey = (await generateNumericHash(keySource)).substring(0, 8);
 
-    const licensePayload = {
+    localStorage.setItem(WEB_LICENSE_KEY, JSON.stringify({
       code: cleanCode,
+      accountNumber: cleanAccountNumber,
       expiry,
       lastSeen: now,
       key: derivedKey
-    };
+    }));
 
-    localStorage.setItem(WEB_LICENSE_KEY, JSON.stringify(licensePayload));
-    return { success: true, expiry, key: derivedKey };
+    return {
+      success: true,
+      expiry,
+      key: derivedKey,
+      durationDays: Number(matchedDuration),
+      accountNumber: cleanAccountNumber
+    };
   },
 
-  /**
-   * Checks the status of the current license
-   */
   async checkLicenseStatus() {
+    const accountNumber = getCurrentAccountNumber();
+    if (!isValidAccountNumber(accountNumber)) {
+      return { isValid: false, error: 'ERR_ACCOUNT_NUMBER_REQUIRED' };
+    }
+
     if (Capacitor.isNativePlatform()) {
       try {
-        const status = await License.checkLicense();
-        return status;
+        return await License.checkLicense({ accountNumber });
       } catch (err) {
         if (err.message && err.message.includes('ERR_EXPIRED')) {
           throw new Error('ERR_EXPIRED', { cause: err });
         }
-        // Fall back to web storage if native fails
       }
     }
 
-    // A locally activated device license must override an expired cloud session.
-    const localLicense = getStoredWebLicenseStatus();
+    const localLicense = getStoredWebLicenseStatus(accountNumber);
     if (localLicense) return localLicense;
 
-    // 1. First check if a user is logged in via Phone Account
     try {
-      const authRaw = localStorage.getItem('fazatak_auth_user');
-      if (authRaw) {
-        const user = JSON.parse(authRaw);
-        if (user && user.subscription_expiry) {
-          const expiryMs = new Date(user.subscription_expiry).getTime();
-          const isExpired = expiryMs < Date.now() || user.subscription_status === 'expired';
+      const user = authService.getCurrentUser();
+      if (user?.account_number === accountNumber && user.subscription_expiry) {
+        const expiryMs = new Date(user.subscription_expiry).getTime();
+        const isExpired = expiryMs < Date.now() || user.subscription_status === 'expired';
+        if (isExpired) throw new Error('ERR_EXPIRED');
 
-          if (isExpired) {
-            throw new Error('ERR_EXPIRED');
-          }
-
-          return {
-            isValid: true,
-            expiry: Math.floor(expiryMs / 1000),
-            key: 'FAZATAK_SECURE_KEY',
-            user
-          };
-        }
+        return {
+          isValid: true,
+          expiry: Math.floor(expiryMs / 1000),
+          key: 'FAZATAK_SECURE_KEY',
+          user,
+          accountNumber
+        };
       }
     } catch (err) {
-      if (err.message && err.message.includes('ERR_EXPIRED')) {
-        throw err;
-      }
+      if (err.message && err.message.includes('ERR_EXPIRED')) throw err;
     }
 
     return { isValid: false, error: 'ERR_NO_LICENSE' };
