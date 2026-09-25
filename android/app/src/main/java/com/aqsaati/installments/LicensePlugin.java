@@ -2,7 +2,6 @@ package com.aqsaati.installments;
 
 import android.content.Context;
 import android.content.SharedPreferences;
-import android.provider.Settings;
 import androidx.security.crypto.EncryptedSharedPreferences;
 import androidx.security.crypto.MasterKeys;
 import com.getcapacitor.JSObject;
@@ -16,7 +15,6 @@ import java.security.MessageDigest;
 public class LicensePlugin extends Plugin {
 
     private static final String SECRET_SALT = "NAYEF_FAZATK_2026_SECURITY_SALT";
-    private static final String DEVICE_SALT = "DEVICE_SALT";
 
     private SharedPreferences getPrefs() {
         try {
@@ -47,46 +45,32 @@ public class LicensePlugin extends Plugin {
         }
     }
 
-    private String getInternalDeviceId() {
-        try {
-            String androidId = Settings.Secure.getString(getContext().getContentResolver(), Settings.Secure.ANDROID_ID);
-            if (androidId == null) androidId = "0000000000000000";
-            
-            MessageDigest digest = MessageDigest.getInstance("SHA-256");
-            byte[] hash = digest.digest((androidId + DEVICE_SALT).getBytes());
-            int shortId = 0;
-            for (int i = 0; i < 4; i++) {
-                shortId = (shortId * 256) + (hash[i] & 0xFF);
-            }
-            return String.format(java.util.Locale.US, "%06d", Math.abs(shortId % 1000000));
-        } catch (Exception e) {
-            return "000000";
-        }
-    }
-
-    @PluginMethod
-    public void getDeviceId(PluginCall call) {
-        try {
-            String deviceNumericId = getInternalDeviceId();
-            JSObject ret = new JSObject();
-            ret.put("deviceId", deviceNumericId);
-            call.resolve(ret);
-        } catch (Exception e) {
-            call.reject("ERR_GET_ID_FAILED");
-        }
+    private String normalizeAccountNumber(String value) {
+        if (value == null) return "";
+        return value.trim().replace('٠','0').replace('١','1').replace('٢','2').replace('٣','3').replace('٤','4')
+                .replace('٥','5').replace('٦','6').replace('٧','7').replace('٨','8').replace('٩','9')
+                .replace('۰','0').replace('۱','1').replace('۲','2').replace('۳','3').replace('۴','4')
+                .replace('۵','5').replace('۶','6').replace('۷','7').replace('۸','8').replace('۹','9');
     }
 
     @PluginMethod
     public void activateLicense(PluginCall call) {
         String code = call.getString("code");
+        String accountNumber = normalizeAccountNumber(call.getString("accountNumber"));
         if (code == null) {
             call.reject("ERR_MISSING_CODE");
+            return;
+        }
+        if (!accountNumber.matches("\\d{8}")) {
+            call.reject("ERR_ACCOUNT_NUMBER_REQUIRED");
             return;
         }
         
         // Convert any Arabic-Indic digits to Western digits just in case
         String cleanCode = code.trim().replace('٠','0').replace('١','1').replace('٢','2').replace('٣','3').replace('٤','4')
-                                   .replace('٥','5').replace('٦','6').replace('٧','7').replace('٨','8').replace('٩','9');
+                                   .replace('٥','5').replace('٦','6').replace('٧','7').replace('٨','8').replace('٩','9')
+                                   .replace('۰','0').replace('۱','1').replace('۲','2').replace('۳','3').replace('۴','4')
+                                   .replace('۵','5').replace('۶','6').replace('۷','7').replace('۸','8').replace('۹','9');
                                    
         if (cleanCode.length() != 9) {
             call.reject("ERR_INVALID_FORMAT");
@@ -94,14 +78,13 @@ public class LicensePlugin extends Plugin {
         }
 
         try {
-            String deviceId = getInternalDeviceId();
             String[] durations = {"30", "90", "180", "365", "9999"};
             String typeDigit = cleanCode.substring(0, 1);
             String codeHash = cleanCode.substring(1);
 
             String matchedDuration = null;
             for (String d : durations) {
-                String expectedHash = generateNumericHash(deviceId + d + SECRET_SALT);
+                String expectedHash = generateNumericHash(accountNumber + d + SECRET_SALT);
                 if (expectedHash.equals(codeHash)) {
                     String expectedType;
                     switch (d) {
@@ -136,12 +119,13 @@ public class LicensePlugin extends Plugin {
                 expiry = baseTime + (Long.parseLong(matchedDuration) * 24 * 60 * 60);
             }
 
-            // Derive a unique key for this license/device combination
-            String keySource = deviceId + cleanCode + SECRET_SALT;
+            // Derive a unique key for this license/account combination
+            String keySource = accountNumber + cleanCode + SECRET_SALT;
             String derivedKey = generateNumericHash(keySource).substring(0, 8); // Simple 8-char key
 
             prefs.edit()
                 .putString("license_code", cleanCode)
+                .putString("account_number", accountNumber)
                 .putLong("expiry", expiry)
                 .putLong("last_seen_time", now)
                 .putString("derived_key", derivedKey)
@@ -151,6 +135,8 @@ public class LicensePlugin extends Plugin {
             ret.put("success", true);
             ret.put("expiry", expiry);
             ret.put("key", derivedKey);
+            ret.put("durationDays", Long.parseLong(matchedDuration));
+            ret.put("accountNumber", accountNumber);
             call.resolve(ret);
 
         } catch (Exception e) {
@@ -161,7 +147,13 @@ public class LicensePlugin extends Plugin {
     @PluginMethod
     public void checkLicense(PluginCall call) {
         SharedPreferences prefs = getPrefs();
+        String accountNumber = normalizeAccountNumber(call.getString("accountNumber"));
+        if (!accountNumber.matches("\\d{8}")) {
+            call.reject("ERR_ACCOUNT_NUMBER_REQUIRED");
+            return;
+        }
         String code = prefs.getString("license_code", null);
+        String storedAccountNumber = prefs.getString("account_number", null);
         long expiry = prefs.getLong("expiry", 0);
         long lastSeen = prefs.getLong("last_seen_time", 0);
         String key = prefs.getString("derived_key", "DUMMY_KEY");
@@ -175,6 +167,10 @@ public class LicensePlugin extends Plugin {
             call.reject("ERR_NO_LICENSE");
             return;
         }
+        if (!accountNumber.equals(storedAccountNumber)) {
+            call.reject("ERR_WRONG_ACCOUNT");
+            return;
+        }
         if (now > expiry) {
             call.reject("ERR_EXPIRED");
             return;
@@ -186,6 +182,7 @@ public class LicensePlugin extends Plugin {
         ret.put("isValid", true);
         ret.put("expiry", expiry);
         ret.put("key", key);
+        ret.put("accountNumber", accountNumber);
         call.resolve(ret);
     }
 
