@@ -110,8 +110,8 @@
     <h1>مولد أكواد التفعيل 🛡️</h1>
     
     <div class="form-group">
-        <label>كود العميل (6 أرقام)</label>
-        <input type="text" id="deviceId" placeholder="مثلاً: 123456" maxlength="6">
+        <label>رقم الحساب (8 أرقام)</label>
+        <input type="text" id="accountNumber" placeholder="مثلاً: 12345678" maxlength="8" inputmode="numeric">
     </div>
 
     <div class="form-group">
@@ -128,7 +128,7 @@
     <button onclick="generateCode()">توليد كود التفعيل</button>
 
     <div id="resultBox" class="result">
-        <label style="color: #a7f3d0;">كود التفعيل الخاص بالعميل:</label>
+        <label style="color: #a7f3d0;">كود التفعيل الخاص بالحساب:</label>
         <div class="code-text" id="activationCode" onclick="copyCode()">--------</div>
         <p style="font-size: 0.8rem; margin: 0; color: #6ee7b7;">اضغط على الكود للنسخ</p>
     </div>
@@ -146,17 +146,20 @@
      * وظيفة توليد كود رقمي معقد بناءً على المعطيات
      */
     async function generateCode() {
-        const deviceId = document.getElementById('deviceId').value;
+        const accountNumber = document.getElementById('accountNumber').value
+            .trim()
+            .replace(/[٠-٩]/g, digit => digit.charCodeAt(0) - 1632)
+            .replace(/[۰-۹]/g, digit => digit.charCodeAt(0) - 1776);
         const duration = document.getElementById('duration').value;
 
-        if (!deviceId || deviceId.length < 5) {
-            alert("برجاء إدخال كود عميل صحيح");
+        if (!/^\d{8}$/.test(accountNumber)) {
+            alert("برجاء إدخال رقم حساب صحيح مكون من 8 أرقام");
             return;
         }
 
         // خوارزمية التشفير الرقمي
         // نستخدم HMAC-SHA256 ونأخذ جزء منه نحوله لأرقام
-        const inputString = deviceId + duration + SECRET_SALT;
+        const inputString = accountNumber + duration + SECRET_SALT;
         const encoder = new TextEncoder();
         const data = encoder.encode(inputString);
         
