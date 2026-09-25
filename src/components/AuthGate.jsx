@@ -53,7 +53,7 @@ const AuthGate = ({ onAuthenticated, isExpired = false, initialUser = null }) =>
       // مزامنة واسترجاع تلقائي كامل قبل دخول التطبيق لضمان استرجاع كافة المعاملات
       setLoginStatusText('جاري استرجاع معاملاتك وبياناتك من السحابة...');
       try {
-        const syncResult = await cloudSyncService.fullSyncOnLogin(user.phone);
+        const syncResult = await cloudSyncService.fullSyncOnLogin(user.account_number, { legacyPhone: user.phone });
         if (syncResult?.success === false) {
           throw new Error('تعذر تجهيز مساحة الحساب بأمان. لم يتم فتح الحساب لحماية بياناتك.');
         }
@@ -92,7 +92,10 @@ const AuthGate = ({ onAuthenticated, isExpired = false, initialUser = null }) =>
       });
 
       // الحساب الجديد يجب أن يبدأ بقاعدة بيانات معزولة عن أي حساب سابق على الجهاز.
-      const syncResult = await cloudSyncService.fullSyncOnLogin(user.phone, { forceIsolated: true });
+      const syncResult = await cloudSyncService.fullSyncOnLogin(user.account_number, {
+        legacyPhone: user.phone,
+        forceIsolated: true
+      });
       if (syncResult?.success === false) {
         throw new Error('تعذر تجهيز مساحة الحساب بأمان. لم يتم فتح الحساب لحماية بياناتك.');
       }
