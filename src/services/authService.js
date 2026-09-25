@@ -203,7 +203,7 @@ export const authService = {
     const { data: insertedUser, error: insertError } = await supabase
       .from('fazatak_users')
       .insert([newUserPayload])
-      .select('id, phone, name, subscription_status, subscription_expiry, created_at')
+      .select('id, account_number, phone, name, subscription_status, subscription_expiry, created_at')
       .single();
 
     if (insertError) {
@@ -240,7 +240,7 @@ export const authService = {
     // جلب الحساب من Supabase
     const { data: user, error } = await supabase
       .from('fazatak_users')
-      .select('id, phone, name, password_hash, subscription_status, subscription_expiry, created_at')
+      .select('id, account_number, phone, name, password_hash, subscription_status, subscription_expiry, created_at')
       .eq('phone', cleanPhone)
       .maybeSingle();
 
@@ -275,6 +275,7 @@ export const authService = {
     // تنظيف البيانات وعدم تخزين كلمة المرور محلياً
     const safeUser = {
       id: user.id,
+      account_number: user.account_number,
       phone: user.phone,
       name: user.name,
       subscription_status: currentStatus,
@@ -396,7 +397,7 @@ export const authService = {
     try {
       const { data, error } = await supabase
         .from('fazatak_users')
-        .select('subscription_status, subscription_expiry')
+        .select('account_number, subscription_status, subscription_expiry')
         .eq('phone', currentUser.phone)
         .maybeSingle();
 
@@ -404,6 +405,7 @@ export const authService = {
         const isExpired = new Date(data.subscription_expiry).getTime() < Date.now();
         const updatedUser = {
           ...currentUser,
+          account_number: data.account_number || currentUser.account_number,
           subscription_status: isExpired ? 'expired' : data.subscription_status,
           subscription_expiry: data.subscription_expiry
         };
@@ -423,18 +425,25 @@ export const authService = {
     const currentUser = this.getCurrentUser();
     if (!currentUser || !supabase) throw new Error('يرجى تسجيل الدخول أولاً');
 
+    const durationDays = Number(days);
+    if (![30, 90, 180, 365, 9999].includes(durationDays)) {
+      throw new Error('مدة الاشتراك غير مدعومة');
+    }
+
     const currentExpiry = new Date(currentUser.subscription_expiry || Date.now());
     const baseDate = currentExpiry.getTime() > Date.now() ? currentExpiry : new Date();
-    baseDate.setDate(baseDate.getDate() + Number(days));
+    const nextExpiry = durationDays === 9999
+      ? new Date(2147483647 * 1000)
+      : new Date(baseDate.getTime() + (durationDays * 24 * 60 * 60 * 1000));
 
     const { data, error } = await supabase
       .from('fazatak_users')
       .update({
         subscription_status: 'active',
-        subscription_expiry: baseDate.toISOString()
+        subscription_expiry: nextExpiry.toISOString()
       })
       .eq('phone', currentUser.phone)
-      .select('subscription_status, subscription_expiry')
+      .select('account_number, subscription_status, subscription_expiry')
       .single();
 
     if (error) {
@@ -443,6 +452,7 @@ export const authService = {
 
     const updated = {
       ...currentUser,
+      account_number: data.account_number || currentUser.account_number,
       subscription_status: data.subscription_status,
       subscription_expiry: data.subscription_expiry
     };
