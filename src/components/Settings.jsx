@@ -209,12 +209,12 @@ const Settings = ({ onSettingsChange, onLicenseRenewed, currentUser, onLogout, i
   const [pdfSignatureImage, setPdfSignatureImage] = useState('');
   const [pdfSignatureText, setPdfSignatureText] = useState('');
   const [pdfSignatureError, setPdfSignatureError] = useState('');
-  const [deviceId, setDeviceId] = useState('');
+  const [accountNumber, setAccountNumber] = useState('');
   const [licenseExpiry, setLicenseExpiry] = useState(null);
   const [renewalCode, setRenewalCode] = useState('');
   const [renewalLoading, setRenewalLoading] = useState(false);
   const [renewalMessage, setRenewalMessage] = useState('');
-  const [deviceCopied, setDeviceCopied] = useState(false);
+  const [accountCopied, setAccountCopied] = useState(false);
   const [subscriptionNow, setSubscriptionNow] = useState(() => Date.now());
   const [playSubscriptionActive, setPlaySubscriptionActive] = useState(false);
   const [playBillingLoading, setPlayBillingLoading] = useState(false);
@@ -293,6 +293,8 @@ const Settings = ({ onSettingsChange, onLicenseRenewed, currentUser, onLogout, i
   useLiveRefresh(loadSettings);
 
   async function loadLicenseInfo() {
+    setAccountNumber(currentUser?.account_number || authService.getCurrentUser()?.account_number || '');
+
     if (billingService.isAvailable()) {
       try {
         const status = await billingService.getStatus();
@@ -300,13 +302,6 @@ const Settings = ({ onSettingsChange, onLicenseRenewed, currentUser, onLogout, i
       } catch (error) {
         console.warn('Google Play subscription status error:', error);
       }
-    }
-
-    try {
-      const id = await licenseService.getDeviceId();
-      setDeviceId(id);
-    } catch (error) {
-      console.error('Device ID error:', error);
     }
 
     try {
@@ -333,15 +328,15 @@ const Settings = ({ onSettingsChange, onLicenseRenewed, currentUser, onLogout, i
     });
   };
 
-  const copyDeviceId = async () => {
-    if (!deviceId) return;
-    await Clipboard.write({ string: deviceId });
-    setDeviceCopied(true);
-    setTimeout(() => setDeviceCopied(false), 2000);
+  const copyAccountNumber = async () => {
+    if (!accountNumber) return;
+    await Clipboard.write({ string: accountNumber });
+    setAccountCopied(true);
+    setTimeout(() => setAccountCopied(false), 2000);
   };
 
   const handleSupportWhatsApp = () => {
-    const message = `السلام عليكم، أريد تجديد اشتراك تطبيق أقساطي. رقم الجهاز: ${deviceId || ''}`;
+    const message = `السلام عليكم، أريد تجديد اشتراك تطبيق أقساطي. رقم الحساب: ${accountNumber || ''}`;
     window.open(`https://wa.me/${SUPPORT_WHATSAPP_PHONE}?text=${encodeURIComponent(message)}`, '_blank');
   };
 
@@ -355,15 +350,18 @@ const Settings = ({ onSettingsChange, onLicenseRenewed, currentUser, onLogout, i
     try {
       const result = await licenseService.activateLicense(renewalCode.trim());
       if (result.success) {
-        setLicenseExpiry(result.expiry);
+        const updatedUser = await authService.activateOrExtendSubscription(result.durationDays);
+        const updatedExpiry = Math.floor(new Date(updatedUser.subscription_expiry).getTime() / 1000);
+        setLicenseExpiry(updatedExpiry);
         setRenewalCode('');
-        setRenewalMessage(`تم تجديد الاشتراك بنجاح. تاريخ الانتهاء الجديد: ${formatLicenseExpiry(result.expiry)}`);
-        onLicenseRenewed?.(result.key, result.expiry);
+        setRenewalMessage(`تم تجديد الاشتراك للحساب بنجاح. تاريخ الانتهاء الجديد: ${formatLicenseExpiry(updatedExpiry)}`);
+        onLicenseRenewed?.(result.key, updatedExpiry);
       }
     } catch (error) {
       const errCode = error.message || '';
       let msg = 'تعذر تجديد الاشتراك. تأكد من الكود وحاول مرة أخرى.';
-      if (errCode.includes('ERR_WRONG_CODE')) msg = 'هذا الكود غير صالح لهذا الجهاز.';
+      if (errCode.includes('ERR_WRONG_CODE')) msg = 'هذا الكود غير صالح لهذا الحساب.';
+      else if (errCode.includes('ERR_WRONG_ACCOUNT') || errCode.includes('ERR_ACCOUNT_NUMBER_REQUIRED')) msg = 'هذا الكود غير صالح لهذا الحساب.';
       else if (errCode.includes('ERR_INVALID_FORMAT')) msg = 'تنسيق الكود غير صحيح. يجب أن يكون 9 أرقام.';
       else if (errCode.includes('ERR_TIME_TAMPERED')) msg = 'تم اكتشاف تلاعب في وقت الجهاز.';
       setRenewalMessage(msg);
@@ -639,6 +637,22 @@ const Settings = ({ onSettingsChange, onLicenseRenewed, currentUser, onLogout, i
                 </span>
               </div>
             )}
+            <div className="flex justify-between items-center gap-3">
+              <span className="text-slate-400">رقم الحساب:</span>
+              <div className="flex items-center gap-2">
+                <span className="text-emerald-300 font-mono font-bold" dir="ltr">
+                  {accountNumber || 'غير متاح'}
+                </span>
+                <button
+                  type="button"
+                  onClick={copyAccountNumber}
+                  disabled={!accountNumber}
+                  className="rounded-lg bg-slate-800 px-2 py-1 text-[10px] font-bold text-slate-200 hover:bg-slate-700 disabled:opacity-50"
+                >
+                  {accountCopied ? 'تم' : 'نسخ'}
+                </button>
+              </div>
+            </div>
             {isReadOnly && (
               <div className="pt-2 border-t border-slate-800/80 flex gap-2">
                 <button
@@ -651,7 +665,7 @@ const Settings = ({ onSettingsChange, onLicenseRenewed, currentUser, onLogout, i
                 <button
                   type="button"
                   onClick={() => {
-                    const message = `السلام عليكم، أريد تجديد اشتراك تطبيق أقساطي لرقم الحساب: ${currentUser?.phone || ''}`;
+                     const message = `السلام عليكم، أريد تجديد اشتراك تطبيق أقساطي لرقم الحساب: ${currentUser?.account_number || accountNumber || ''}`;
                     window.open(`https://wa.me/${SUPPORT_WHATSAPP_PHONE}?text=${encodeURIComponent(message)}`, '_blank');
                   }}
                   className="px-3.5 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl font-bold text-xs shadow transition-all active:scale-95 cursor-pointer flex items-center gap-1"
@@ -721,7 +735,7 @@ const Settings = ({ onSettingsChange, onLicenseRenewed, currentUser, onLogout, i
 
       {/* License Section */}
       <div className="bg-slate-800 rounded-2xl p-6 border border-slate-700 shadow-sm">
-        <h3 className="text-lg font-bold text-white mb-4 flex items-center gap-2">الاشتراك والجهاز</h3>
+         <h3 className="text-lg font-bold text-white mb-4 flex items-center gap-2">الاشتراك ورقم الحساب</h3>
 
         <div className="space-y-4">
           {billingService.isAvailable() ? (
@@ -756,17 +770,17 @@ const Settings = ({ onSettingsChange, onLicenseRenewed, currentUser, onLogout, i
           ) : (
           <>
           <div>
-            <label className="block text-sm text-slate-400 mb-2">رقم الجهاز</label>
+             <label className="block text-sm text-slate-400 mb-2">رقم الحساب</label>
             <div className="flex gap-2">
               <div className="flex-1 bg-slate-900 border border-slate-600 rounded-xl px-4 py-3 text-emerald-400 font-mono text-center tracking-wider">
-                {deviceId || 'جاري التحميل...'}
+                 {accountNumber || 'جاري التحميل...'}
               </div>
               <button
                 type="button"
-                onClick={copyDeviceId}
-                className={`px-4 rounded-xl font-bold transition-colors ${deviceCopied ? 'bg-emerald-600 text-white' : 'bg-slate-700 text-slate-200 hover:bg-slate-600'}`}
-              >
-                {deviceCopied ? 'تم' : 'نسخ'}
+                 onClick={copyAccountNumber}
+                 className={`px-4 rounded-xl font-bold transition-colors ${accountCopied ? 'bg-emerald-600 text-white' : 'bg-slate-700 text-slate-200 hover:bg-slate-600'}`}
+               >
+                 {accountCopied ? 'تم' : 'نسخ'}
               </button>
             </div>
           </div>
