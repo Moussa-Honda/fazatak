@@ -53,9 +53,13 @@ const AuthGate = ({ onAuthenticated, isExpired = false, initialUser = null }) =>
       // مزامنة واسترجاع تلقائي كامل قبل دخول التطبيق لضمان استرجاع كافة المعاملات
       setLoginStatusText('جاري استرجاع معاملاتك وبياناتك من السحابة...');
       try {
-        await cloudSyncService.fullSyncOnLogin(user.phone);
+        const syncResult = await cloudSyncService.fullSyncOnLogin(user.phone);
+        if (syncResult?.success === false) {
+          throw new Error('تعذر تجهيز مساحة الحساب بأمان. لم يتم فتح الحساب لحماية بياناتك.');
+        }
       } catch (syncErr) {
-        console.warn('Login cloud sync error:', syncErr);
+        console.error('Login cloud sync error:', syncErr);
+        throw syncErr;
       }
 
       // الدخول مباشرة للتطبيق حتى وإن كانت التجربة أو الاشتراك منتهياً (وضع العرض فقط)
@@ -86,6 +90,12 @@ const AuthGate = ({ onAuthenticated, isExpired = false, initialUser = null }) =>
         password: regPassword,
         pin: regPin
       });
+
+      // الحساب الجديد يجب أن يبدأ بقاعدة بيانات معزولة عن أي حساب سابق على الجهاز.
+      const syncResult = await cloudSyncService.fullSyncOnLogin(user.phone, { forceIsolated: true });
+      if (syncResult?.success === false) {
+        throw new Error('تعذر تجهيز مساحة الحساب بأمان. لم يتم فتح الحساب لحماية بياناتك.');
+      }
 
       setSuccessMsg('تم إنشاء حسابك بنجاح وبدء الفترة التجريبية!');
       setTimeout(() => {
@@ -549,7 +559,7 @@ const AuthGate = ({ onAuthenticated, isExpired = false, initialUser = null }) =>
                 className="w-full py-3.5 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-bold text-sm rounded-xl shadow-lg flex items-center justify-center gap-2 transition-all cursor-pointer"
               >
                 <span>💬</span>
-                <span>تجديد الاشتراك عبر واتساب ({SUPPORT_PHONE_DISPLAY})</span>
+                   <span>واتساب الدعم ({SUPPORT_PHONE_DISPLAY})</span>
               </button>
 
               {/* Code Activation Alternative */}
