@@ -1,34 +1,30 @@
 import { useState, useEffect } from 'react';
 import { Clipboard } from '@capacitor/clipboard';
 import licenseService from '../services/license';
+import { authService } from '../services/authService';
 
 const SUPPORT_PHONE_DISPLAY = '+966556854162';
 const SUPPORT_WHATSAPP_PHONE = '966556854162';
 
 const LicenseGate = ({ onActivated, isModal = false }) => {
-  const [deviceId, setDeviceId] = useState('');
+  const [accountNumber, setAccountNumber] = useState('');
   const [code, setCode] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [copied, setCopied] = useState(false);
 
   useEffect(() => {
-    loadDeviceId();
+    setAccountNumber(authService.getCurrentUser()?.account_number || '');
   }, []);
 
-  const loadDeviceId = async () => {
-    const id = await licenseService.getDeviceId();
-    setDeviceId(id);
-  };
-
   const handleCopy = async () => {
-    await Clipboard.write({ string: deviceId });
+    await Clipboard.write({ string: accountNumber });
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };
 
   const handleSupportWhatsApp = () => {
-    const message = `السلام عليكم، أريد تجديد اشتراك تطبيق أقساطي. رقم الجهاز: ${deviceId || ''}`;
+    const message = `السلام عليكم، أريد تجديد اشتراك تطبيق أقساطي. رقم الحساب: ${accountNumber || ''}`;
     window.open(`https://wa.me/${SUPPORT_WHATSAPP_PHONE}?text=${encodeURIComponent(message)}`, '_blank');
   };
 
@@ -38,16 +34,18 @@ const LicenseGate = ({ onActivated, isModal = false }) => {
     setError('');
     
     try {
-      const result = await licenseService.activateLicense(code.trim());
+      const result = await licenseService.activateLicense(code.trim(), accountNumber);
       if (result.success) {
-        onActivated(result.key, result.expiry);
+        const updatedUser = await authService.activateOrExtendSubscription(result.durationDays);
+        onActivated(result.key, Math.floor(new Date(updatedUser.subscription_expiry).getTime() / 1000));
       }
     } catch (err) {
       let msg = 'فشل التفعيل: تأكد من الكود وحاول مجدداً';
       const errCode = err.message || '';
       
       if (errCode.includes('ERR_EXPIRED')) msg = 'عذراً، هذا الكود منتهي الصلاحية';
-      else if (errCode.includes('ERR_WRONG_CODE')) msg = 'هذا الكود غير صالح لهذا الجهاز';
+      else if (errCode.includes('ERR_WRONG_CODE')) msg = 'هذا الكود غير صالح لهذا الحساب';
+      else if (errCode.includes('ERR_WRONG_ACCOUNT') || errCode.includes('ERR_ACCOUNT_NUMBER_REQUIRED')) msg = 'رقم الحساب غير متاح أو غير صحيح';
       else if (errCode.includes('ERR_INVALID_FORMAT')) msg = 'تنسيق الكود غير صحيح (9 أرقام)';
       else if (errCode.includes('ERR_TIME_TAMPERED')) msg = 'تنبيه: تم اكتشاف تلاعب في وقت الجهاز';
       else if (errCode.includes('ERR_COMPROMISED')) msg = 'تم اكتشاف بيئة غير آمنة (Root/Emulator)';
@@ -73,12 +71,12 @@ const LicenseGate = ({ onActivated, isModal = false }) => {
 
         {/* Content */}
         <div className="p-8 space-y-6">
-          {/* Device ID Section */}
+          {/* Account Number Section */}
           <div className="space-y-2">
-            <label className="text-slate-400 text-xs font-medium mr-1">معرف الجهاز الخاص بك</label>
+            <label className="text-slate-400 text-xs font-medium mr-1">رقم الحساب الخاص بك</label>
             <div className="flex gap-2">
               <div className="flex-1 bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 font-mono text-emerald-400 text-center text-sm tracking-wider">
-                {deviceId || 'جاري التحميل...'}
+                {accountNumber || 'جاري التحميل...'}
               </div>
               <button 
                 onClick={handleCopy}
@@ -87,7 +85,7 @@ const LicenseGate = ({ onActivated, isModal = false }) => {
                 {copied ? '✅' : '📋'}
               </button>
             </div>
-            <p className="text-[10px] text-slate-500 mr-1 italic">قم بنسخ هذا المعرف وأرسله للمطور للحصول على الكود</p>
+            <p className="text-[10px] text-slate-500 mr-1 italic">استخدم رقم الحساب عند طلب كود التجديد</p>
           </div>
 
           <div className="h-px bg-slate-800" />
@@ -107,7 +105,7 @@ const LicenseGate = ({ onActivated, isModal = false }) => {
               </button>
             </div>
             <p className="text-[11px] text-slate-400 leading-5">
-              يرسل الزر رقم الجهاز تلقائيًا حتى تحصل على كود التجديد الصحيح.
+              يرسل الزر رقم الحساب تلقائيًا حتى تحصل على كود التجديد الصحيح.
             </p>
           </div>
 
