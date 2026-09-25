@@ -15,6 +15,7 @@ let autoSyncInitialized = false;
 // Notification permission belongs to this device, not the cloud account.
 const DEVICE_NOTIFICATION_SETTING_KEYS = [
   'due_alerts_enabled',
+  'screen_privacy',
 ];
 
 const preserveDeviceNotificationSettings = async (cloudPayload) => {
@@ -39,6 +40,30 @@ const preserveDeviceNotificationSettings = async (cloudPayload) => {
       settings: [...cloudSettings, ...(localSettings.values || [])],
     },
   };
+};
+
+const clearLocalUserData = async (localPayload) => {
+  const localTables = localPayload?.tables || {};
+  const tables = Object.fromEntries(
+    Object.entries(localTables).map(([tableName, rows]) => [
+      tableName,
+      tableName === 'settings'
+        ? (Array.isArray(rows)
+          ? rows.filter((row) => DEVICE_NOTIFICATION_SETTING_KEYS.includes(row?.key))
+          : [])
+        : []
+    ])
+  );
+
+  await importData({
+    app: 'fazatak',
+    version: localPayload?.version || '2.0-offline',
+    fileName: localPayload?.fileName || 'أقساطي_Backup.json',
+    exportedAt: new Date().toISOString(),
+    counts: Object.fromEntries(Object.entries(tables).map(([tableName, rows]) => [tableName, rows.length])),
+    tables
+  });
+  await persistWebStore();
 };
 
 export const notifySyncStatus = (status, detail = {}) => {
@@ -462,7 +487,7 @@ export const cloudSyncService = {
    * المزامنة الشاملة عند تسجيل الدخول أو فتح التطبيق:
    * تضمن تحميل كافة المعاملات من السحابة قبل الانتقال للواجهة الرئيسية
    */
-  async fullSyncOnLogin(phone) {
+  async fullSyncOnLogin(phone, { forceIsolated = false } = {}) {
     if (!phone) return { success: false };
 
     try {
@@ -473,15 +498,41 @@ export const cloudSyncService = {
 
       // هل هذا المتصفح كان مسجلاً برقم آخر؟
       const lastDbPhone = localStorage.getItem('fazatak_current_db_phone');
-      const isUserSwitch = Boolean(lastDbPhone && lastDbPhone !== phone);
+      const isUserSwitch = forceIsolated || Boolean(lastDbPhone && lastDbPhone !== phone);
 
       // 1. جلب بيانات السحابة للرقم الحالي
       const cloudRecord = await this.getCloudBackup(phone);
       const cloudBusinessCount = getBusinessRecordsCount(cloudRecord?.backup_payload);
 
+      // لا تسمح لبيانات الحساب السابق بالبقاء عند تبديل الحساب أو إنشاء حساب جديد.
+      // نحفظ نسخة محلية للحساب السابق قبل تنظيف قاعدة البيانات حتى لا نفقدها عند العودة إليه.
+      if (isUserSwitch) {
+        if (lastDbPhone && lastDbPhone !== phone && localBusinessCount > 0) {
+          localStorage.setItem(`fazatak_user_cache_${lastDbPhone}`, JSON.stringify(localPayload));
+        }
+
+        if (cloudRecord?.backup_payload) {
+          await importData(await preserveDeviceNotificationSettings(cloudRecord.backup_payload));
+          await persistWebStore();
+          localStorage.setItem(LAST_SYNC_KEY, cloudRecord.updated_at || new Date().toISOString());
+          localStorage.setItem(`fazatak_user_cache_${phone}`, JSON.stringify(cloudRecord.backup_payload));
+          localStorage.setItem('fazatak_current_db_phone', phone);
+          localStorage.removeItem('fazatak_has_pending_cloud_sync');
+          notifyDataChanged({ scope: 'all', action: 'login-restore' });
+          return { success: true, restored: true, recordsCount: cloudRecord.records_count };
+        }
+
+        await clearLocalUserData(localPayload);
+        localStorage.setItem('fazatak_current_db_phone', phone);
+        localStorage.removeItem(LAST_SYNC_KEY);
+        localStorage.removeItem('fazatak_has_pending_cloud_sync');
+        notifyDataChanged({ scope: 'all', action: 'account-switch' });
+        return { success: true, switched: true, empty: true };
+      }
+
       // 2. إذا كانت السحابة تحتوي على معاملات: استرجاعها فوراً وبشكل حاسم
       if (cloudBusinessCount > 0) {
-        if (isUserSwitch || localBusinessCount === 0 || cloudBusinessCount >= localBusinessCount) {
+        if (localBusinessCount === 0 || cloudBusinessCount >= localBusinessCount) {
           console.log(`[FullSyncOnLogin] جاري استرجاع ${cloudBusinessCount} معاملة من السحابة للرقم: ${phone}`);
           await importData(await preserveDeviceNotificationSettings(cloudRecord.backup_payload));
           await persistWebStore();
