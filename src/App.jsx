@@ -84,15 +84,15 @@ function App() {
     if (!isLicensed) return;
 
     // فحص مزامنة التحديثات في الخلفية عند فتح التطبيق
-    if (currentUser?.phone) {
-      cloudSyncService.syncWithCloud(currentUser.phone).catch((err) => {
+    if (currentUser?.account_number) {
+      cloudSyncService.syncWithCloud(currentUser.account_number, currentUser.phone).catch((err) => {
         console.warn('Background sync check note:', err);
       });
     }
   }, [isLicensed, currentUser]);
 
   useEffect(() => {
-    if (!isLicensed || !currentUser?.phone) return undefined;
+    if (!isLicensed || !currentUser?.account_number) return undefined;
 
     const handleVisibilityChange = () => {
       if (document.visibilityState === 'hidden' && authService.isAppLockEnabled(currentUser.phone)) {
@@ -147,7 +147,7 @@ function App() {
 
         // فحص واسترجاع ذكي فوري إذا كانت المعاملات غير موجودة محلياً قبل فتح الواجهة
         try {
-          await cloudSyncService.fullSyncOnLogin(user.phone);
+          await cloudSyncService.fullSyncOnLogin(user.account_number, { legacyPhone: user.phone });
         } catch (syncErr) {
           console.warn('Startup sync check note:', syncErr);
         }
