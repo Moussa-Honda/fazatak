@@ -95,7 +95,7 @@ const LicenseGate = ({ onActivated, isModal = false }) => {
           <div className="bg-emerald-500/10 border border-emerald-500/25 rounded-2xl p-4 space-y-3">
             <div className="flex items-center justify-between gap-3">
               <div>
-                <p className="text-white text-sm font-bold">لتجديد الاشتراك</p>
+                <p className="text-white text-sm font-bold">رقم دعم التجديد</p>
                 <p className="text-emerald-300 text-sm font-mono mt-1" dir="ltr">{SUPPORT_PHONE_DISPLAY}</p>
               </div>
               <button
