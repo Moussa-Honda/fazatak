@@ -93,12 +93,12 @@ bool is_compromised() {
 
 extern "C" JNIEXPORT jstring JNICALL
 Java_com_installment_app_LicensePlugin_verifyLicenseNative(
-        JNIEnv* env, jobject, jstring jPayload, jbyteArray jSignature, jstring jDeviceId, jlong jTs) {
+        JNIEnv* env, jobject, jstring jPayload, jbyteArray jSignature, jstring jAccountNumber, jlong jTs) {
 
     if (is_compromised()) return env->NewStringUTF("ERR_COMPROMISED");
 
     const char* payload = env->GetStringUTFChars(jPayload, 0);
-    const char* device_id = env->GetStringUTFChars(jDeviceId, 0);
+    const char* account_number = env->GetStringUTFChars(jAccountNumber, 0);
     jbyte* sig_der = env->GetByteArrayElements(jSignature, 0);
     jsize sig_der_len = env->GetArrayLength(jSignature);
 
@@ -108,7 +108,7 @@ Java_com_installment_app_LicensePlugin_verifyLicenseNative(
     uint8_t raw_sig[64];
     if (!der_to_raw((uint8_t*)sig_der, sig_der_len, raw_sig)) {
         env->ReleaseStringUTFChars(jPayload, payload);
-        env->ReleaseStringUTFChars(jDeviceId, device_id);
+        env->ReleaseStringUTFChars(jAccountNumber, account_number);
         env->ReleaseByteArrayElements(jSignature, sig_der, 0);
         return env->NewStringUTF("ERR_INVALID_SIG_FORMAT");
     }
@@ -117,8 +117,8 @@ Java_com_installment_app_LicensePlugin_verifyLicenseNative(
 
     std::string secret = "";
     if (ret == P256_SUCCESS) {
-        // Derive key: SHA256(device_id + payload + static_salt)
-        std::string seed = std::string(device_id) + payload + "PROTECT_ME_2026";
+        // Derive key: SHA256(account_number + payload + static_salt)
+        std::string seed = std::string(account_number) + payload + "PROTECT_ME_2026";
         uint8_t key[32];
         sha256_hash((uint8_t*)seed.c_str(), seed.length(), key);
         char hex[65];
@@ -129,7 +129,7 @@ Java_com_installment_app_LicensePlugin_verifyLicenseNative(
     }
 
     env->ReleaseStringUTFChars(jPayload, payload);
-    env->ReleaseStringUTFChars(jDeviceId, device_id);
+    env->ReleaseStringUTFChars(jAccountNumber, account_number);
     env->ReleaseByteArrayElements(jSignature, sig_der, 0);
 
     return env->NewStringUTF(secret.c_str());
