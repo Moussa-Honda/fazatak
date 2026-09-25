@@ -458,7 +458,7 @@ const Dashboard = ({ isExpired, expiry, onReActivate, currentUser, onLogout }) =
               <div className="mx-4 mt-4 p-4 bg-rose-500/10 border border-rose-500/30 rounded-2xl flex items-center justify-between gap-3">
                 <div className="flex-1">
                   <h4 className="text-rose-400 font-bold text-sm">انتهى الاشتراك! ⚠️</h4>
-                  <p className="text-rose-400/80 text-[10px]">لتجديد الاشتراك تواصل معنا: <span dir="ltr">{SUPPORT_PHONE_DISPLAY}</span></p>
+                   <p className="text-rose-400/80 text-[10px]">رقم دعم التجديد: <span dir="ltr">{SUPPORT_PHONE_DISPLAY}</span></p>
                 </div>
                 <div className="flex items-center gap-2">
                   <button
