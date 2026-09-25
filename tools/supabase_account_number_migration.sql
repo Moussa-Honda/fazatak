@@ -28,4 +28,20 @@ alter table fazatak_users
 create unique index if not exists idx_fazatak_users_account_number
   on fazatak_users(account_number);
 
+-- نقل النسخ السحابية من رقم الهاتف إلى رقم الحساب الثابت.
+alter table fazatak_user_data
+  add column if not exists user_account_number text;
+
+update fazatak_user_data d
+set user_account_number = u.account_number
+from fazatak_users u
+where d.user_phone = u.phone
+  and (d.user_account_number is null or btrim(d.user_account_number) = '');
+
+create unique index if not exists idx_fazatak_user_data_account_number
+  on fazatak_user_data(user_account_number);
+
+create index if not exists idx_fazatak_user_data_phone
+  on fazatak_user_data(user_phone);
+
 commit;

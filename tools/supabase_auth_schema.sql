@@ -26,11 +26,24 @@ create index if not exists idx_fazatak_users_phone on fazatak_users(phone);
 -- 2. جدول حفظ ومزامنة بيانات ومعاملات العميل (العقود، الأقساط، العملاء، السندات)
 create table if not exists fazatak_user_data (
   id uuid default gen_random_uuid() primary key,
+  user_account_number text unique not null references fazatak_users(account_number) on delete cascade,
   user_phone text unique not null references fazatak_users(phone) on delete cascade,
   backup_payload jsonb not null,
   records_count integer default 0,
   updated_at timestamp with time zone default timezone('utc'::text, now())
 );
+
+alter table fazatak_user_data
+  add column if not exists user_account_number text;
+
+update fazatak_user_data d
+set user_account_number = u.account_number
+from fazatak_users u
+where d.user_phone = u.phone
+  and (d.user_account_number is null or btrim(d.user_account_number) = '');
+
+create unique index if not exists idx_fazatak_user_data_account_number
+  on fazatak_user_data(user_account_number);
 
 create index if not exists idx_fazatak_user_data_phone on fazatak_user_data(user_phone);
 
