@@ -2,41 +2,35 @@ import Capacitor
 import CryptoKit
 import Foundation
 import Security
-import UIKit
 
 @objc(LicensePlugin)
 public class LicensePlugin: CAPPlugin, CAPBridgedPlugin {
     public let identifier = "LicensePlugin"
     public let jsName = "License"
     public let pluginMethods: [CAPPluginMethod] = [
-        CAPPluginMethod(name: "getDeviceId", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "activateLicense", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "checkLicense", returnType: CAPPluginReturnPromise)
     ]
 
     private let secretSalt = "NAYEF_FAZATK_2026_SECURITY_SALT"
-    private let deviceSalt = "DEVICE_SALT"
     private let keychainService = "com.installment.app.license"
 
     private enum Account {
-        static let deviceSeed = "device_seed"
+        static let accountNumber = "account_number"
         static let licenseCode = "license_code"
         static let expiry = "expiry"
         static let lastSeenTime = "last_seen_time"
         static let derivedKey = "derived_key"
     }
 
-    @objc public func getDeviceId(_ call: CAPPluginCall) {
-        do {
-            call.resolve(["deviceId": try internalDeviceId()])
-        } catch {
-            call.reject("ERR_GET_ID_FAILED")
-        }
-    }
-
     @objc public func activateLicense(_ call: CAPPluginCall) {
         guard let rawCode = call.getString("code") else {
             call.reject("ERR_MISSING_CODE")
+            return
+        }
+        let accountNumber = normalizedDigits(call.getString("accountNumber") ?? "")
+        guard accountNumber.range(of: "^[0-9]{8}$", options: .regularExpression) != nil else {
+            call.reject("ERR_ACCOUNT_NUMBER_REQUIRED")
             return
         }
 
@@ -47,7 +41,6 @@ public class LicensePlugin: CAPPlugin, CAPBridgedPlugin {
         }
 
         do {
-            let deviceId = try internalDeviceId()
             let typeDigit = String(code.prefix(1))
             let codeHash = String(code.dropFirst())
             let durations: [(days: Int64, type: String)] = [
@@ -60,7 +53,7 @@ public class LicensePlugin: CAPPlugin, CAPBridgedPlugin {
 
             guard let matchedDuration = durations.first(where: { duration in
                 duration.type == typeDigit &&
-                    numericHash(deviceId + String(duration.days) + secretSalt) == codeHash
+                    numericHash(accountNumber + String(duration.days) + secretSalt) == codeHash
             }) else {
                 call.reject("ERR_WRONG_CODE")
                 return
@@ -78,7 +71,8 @@ public class LicensePlugin: CAPPlugin, CAPBridgedPlugin {
                 expiry = max(now, currentExpiry) + (matchedDuration.days * 24 * 60 * 60)
             }
 
-            let derivedKey = numericHash(deviceId + code + secretSalt)
+            let derivedKey = numericHash(accountNumber + code + secretSalt)
+            try writeString(accountNumber, account: Account.accountNumber)
             try writeString(code, account: Account.licenseCode)
             try writeString(String(expiry), account: Account.expiry)
             try writeString(String(now), account: Account.lastSeenTime)
@@ -87,7 +81,9 @@ public class LicensePlugin: CAPPlugin, CAPBridgedPlugin {
             call.resolve([
                 "success": true,
                 "expiry": expiry,
-                "key": derivedKey
+                "key": derivedKey,
+                "durationDays": matchedDuration.days,
+                "accountNumber": accountNumber
             ])
         } catch {
             call.reject("ERR_ACTIVATION_FAILED")
@@ -96,8 +92,17 @@ public class LicensePlugin: CAPPlugin, CAPBridgedPlugin {
 
     @objc public func checkLicense(_ call: CAPPluginCall) {
         do {
+            let accountNumber = normalizedDigits(call.getString("accountNumber") ?? "")
+            guard accountNumber.range(of: "^[0-9]{8}$", options: .regularExpression) != nil else {
+                call.reject("ERR_ACCOUNT_NUMBER_REQUIRED")
+                return
+            }
             guard try readString(Account.licenseCode) != nil else {
                 call.reject("ERR_NO_LICENSE")
+                return
+            }
+            guard try readString(Account.accountNumber) == accountNumber else {
+                call.reject("ERR_WRONG_ACCOUNT")
                 return
             }
 
@@ -120,28 +125,12 @@ public class LicensePlugin: CAPPlugin, CAPBridgedPlugin {
             call.resolve([
                 "isValid": true,
                 "expiry": expiry,
-                "key": key
+                "key": key,
+                "accountNumber": accountNumber
             ])
         } catch {
             call.reject("ERR_LICENSE_STORAGE")
         }
-    }
-
-    private func internalDeviceId() throws -> String {
-        let seed: String
-        if let storedSeed = try readString(Account.deviceSeed), !storedSeed.isEmpty {
-            seed = storedSeed
-        } else {
-            seed = UIDevice.current.identifierForVendor?.uuidString ?? UUID().uuidString
-            try writeString(seed, account: Account.deviceSeed)
-        }
-
-        let digest = SHA256.hash(data: Data((seed + deviceSalt).utf8))
-        let bytes = Array(digest.prefix(4))
-        let value = bytes.reduce(UInt32(0)) { partial, byte in
-            (partial << 8) | UInt32(byte)
-        }
-        return String(format: "%06u", value % 1_000_000)
     }
 
     private func numericHash(_ input: String) -> String {
