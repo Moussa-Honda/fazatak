@@ -1,4 +1,4 @@
-50apply plugin: 'com.android.application'
+apply plugin: 'com.android.application'
 
 def releaseKeystorePath = System.getenv('ANDROID_KEYSTORE_PATH')
 def releaseKeystoreFile = releaseKeystorePath ? file(releaseKeystorePath) : null
