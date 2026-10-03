@@ -6,6 +6,20 @@ import './index.css'
 import App from './App.jsx'
 import ErrorBoundary from './components/ErrorBoundary.jsx'
 
+const isNativeOAuthCallback = window.location.pathname === '/oauth-callback.html'
+if (isNativeOAuthCallback) {
+  const raw = window.location.hash.slice(1) || window.location.search.slice(1)
+  const params = new URLSearchParams(raw)
+  document.body.innerHTML = '<p id="oauth-callback-status" style="font-family:system-ui,sans-serif;padding:2rem;text-align:center;color:#334155">Returning to Aqsaati...</p>'
+  if (params.has('access_token') || params.has('error')) {
+    window.setTimeout(() => {
+      window.location.replace('com.aqsaati.installments://oauth?' + params.toString())
+    }, 0)
+  } else {
+    document.getElementById('oauth-callback-status').textContent = 'No Google sign-in result was received.'
+  }
+}
+
 const syncViewportHeight = () => {
   const height = window.visualViewport?.height || window.innerHeight
   document.documentElement.style.setProperty('--app-height', `${height}px`)
@@ -19,7 +33,7 @@ window.visualViewport?.addEventListener('resize', syncViewportHeight)
 jeepSqlite(window)
 
 // Register Service Worker for Offline PWA
-if ('serviceWorker' in navigator && window.location.protocol.startsWith('http')) {
+if (!isNativeOAuthCallback && 'serviceWorker' in navigator && window.location.protocol.startsWith('http')) {
   window.addEventListener('load', async () => {
     try {
       const registration = await navigator.serviceWorker.register('/sw.js', {
@@ -93,8 +107,10 @@ const mountApp = async () => {
   }
 }
 
-if (document.readyState === 'loading') {
-  document.addEventListener('DOMContentLoaded', mountApp)
-} else {
-  mountApp()
+if (!isNativeOAuthCallback) {
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', mountApp)
+  } else {
+    mountApp()
+  }
 }
