@@ -186,6 +186,7 @@ const Settings = ({ onSettingsChange, onLicenseRenewed, currentUser, onLogout, i
   const [quickPaymentMode, setQuickPaymentMode] = useState(false);
   const [sortCustomersAlphabetically, setSortCustomersAlphabetically] = useState(false);
   const [showManagerLastUpdated, setShowManagerLastUpdated] = useState(true);
+  const [zakatEnabled, setZakatEnabled] = useState(false);
   const [privacyMode, setPrivacyMode] = useState(false);
   const [screenPrivacy, setScreenPrivacy] = useState(true);
   const [hijriCalendar, setHijriCalendar] = useState(false);
@@ -237,7 +238,7 @@ const Settings = ({ onSettingsChange, onLicenseRenewed, currentUser, onLogout, i
         quick, privacy, screenPrivacyValue, hijriCalendarValue,
         bizName, bizContact, taxNo, showPdf, stampEnabled, stampImage, stampText, signatureEnabled, signatureImage, signatureText, overThreshold, stagThreshold,
         dueAlerts, whatsappText,
-         showCustody, showTicker, sortCustomers, managerLastUpdated
+         showCustody, showTicker, sortCustomers, managerLastUpdated, zakatEnabledValue
       ] = await Promise.all([
         settingsService.get('quick_payment_mode'),
         settingsService.get('privacy_mode'),
@@ -260,13 +261,15 @@ const Settings = ({ onSettingsChange, onLicenseRenewed, currentUser, onLogout, i
          settingsService.get('show_custody_section'),
          settingsService.get('show_motivational_ticker'),
          settingsService.get('sort_customers_alphabetically'),
-         settingsService.get('show_manager_last_updated')
+         settingsService.get('show_manager_last_updated'),
+         settingsService.get('zakat_enabled')
       ]);
       
       setShowCustodySection(showCustody !== 'false');
       setShowMotivationalTicker(showTicker !== 'false');
       setSortCustomersAlphabetically(sortCustomers === 'true');
       setShowManagerLastUpdated(managerLastUpdated !== 'false');
+       setZakatEnabled(zakatEnabledValue === 'true');
       setQuickPaymentMode(quick === 'true');
       setPrivacyMode(privacy === 'true');
       setScreenPrivacy(screenPrivacyValue !== 'false');
@@ -844,6 +847,7 @@ const Settings = ({ onSettingsChange, onLicenseRenewed, currentUser, onLogout, i
          <ToggleItem title="الرسائل التحفيزية" description="عرض آية أو ذكر أو عبارة تشجيعية بجانب شعار أقساطي" value={showMotivationalTicker} onToggle={() => toggleSetting('show_motivational_ticker', showMotivationalTicker, setShowMotivationalTicker)} icon="✨" />
          <ToggleItem title="ترتيب العملاء والحسابات أبجديًا" description="عرض العملاء والحسابات بالنيابة حسب الاسم من أ إلى ي" value={sortCustomersAlphabetically} onToggle={() => toggleSetting('sort_customers_alphabetically', sortCustomersAlphabetically, setSortCustomersAlphabetically)} icon="🔤" />
          <ToggleItem title="عرض آخر تعديل للحسابات بالنيابة" description="إظهار تاريخ ووقت آخر تعديل على كل مدير" value={showManagerLastUpdated} onToggle={() => toggleSetting('show_manager_last_updated', showManagerLastUpdated, setShowManagerLastUpdated)} icon="🕒" />
+          <ToggleItem title="تفعيل قسم الزكاة" description="إظهار حاسبة الزكاة في الشريط السفلي للتطبيق" value={zakatEnabled} onToggle={() => toggleSetting('zakat_enabled', zakatEnabled, setZakatEnabled)} icon="🕌" disabled={updatingSetting === 'zakat_enabled'} />
       </div>
 
       {/* Account Security Section */}
