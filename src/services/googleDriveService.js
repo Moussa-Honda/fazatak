@@ -1,12 +1,94 @@
+import { App } from '@capacitor/app';
+import { Browser } from '@capacitor/browser';
+import { Capacitor } from '@capacitor/core';
 import { exportData } from './backupService';
 
 export const GOOGLE_CLIENT_ID = '597146195568-mkdtembb730lqo0bbngopr5desv7s5ur.apps.googleusercontent.com';
+const NATIVE_GOOGLE_CLIENT_ID = '870424617300-uc4o4aog931vacddps43n3kour9ie32v.apps.googleusercontent.com';
+const NATIVE_REDIRECT_URI = 'https://fazatak.pages.dev/oauth-callback.html';
+const NATIVE_APP_SCHEME = 'com.aqsaati.installments';
+const NATIVE_OAUTH_HOST = 'oauth';
 const SCOPES = 'https://www.googleapis.com/auth/drive.file';
 
 let tokenClient = null;
 let currentAccessToken = null;
 let tokenExpiresAt = 0;
 const TOKEN_REQUEST_TIMEOUT_MS = 30000;
+
+const getNativeAccessToken = async (promptConsent = false) => {
+  const now = Date.now();
+  if (!promptConsent && currentAccessToken && tokenExpiresAt > now + 60000) {
+    return currentAccessToken;
+  }
+
+  const state = window.crypto?.randomUUID?.() || String(Date.now()) + Math.random().toString(36).slice(2);
+  const authUrl = new URL('https://accounts.google.com/o/oauth2/v2/auth');
+  authUrl.search = new URLSearchParams({
+    client_id: NATIVE_GOOGLE_CLIENT_ID,
+    redirect_uri: NATIVE_REDIRECT_URI,
+    response_type: 'token',
+    scope: SCOPES,
+    include_granted_scopes: 'true',
+    prompt: promptConsent ? 'consent' : 'select_account',
+    state,
+  }).toString();
+
+  let listenerHandle = null;
+  let timeoutId = null;
+  let resolveToken;
+  let rejectToken;
+  const tokenPromise = new Promise((resolve, reject) => {
+    resolveToken = resolve;
+    rejectToken = reject;
+  });
+
+  const handleUrl = ({ url }) => {
+    let parsedUrl;
+    try {
+      parsedUrl = new URL(url);
+    } catch {
+      return;
+    }
+
+    if (parsedUrl.protocol !== NATIVE_APP_SCHEME + ':' || parsedUrl.hostname !== NATIVE_OAUTH_HOST) {
+      return;
+    }
+
+    if (parsedUrl.searchParams.get('state') !== state) {
+      rejectToken(new Error('تعذر التحقق من جلسة تسجيل الدخول إلى Google'));
+      return;
+    }
+
+    const oauthError = parsedUrl.searchParams.get('error');
+    if (oauthError) {
+      rejectToken(new Error(parsedUrl.searchParams.get('error_description') || 'تم إلغاء تسجيل الدخول'));
+      return;
+    }
+
+    const accessToken = parsedUrl.searchParams.get('access_token');
+    if (!accessToken) {
+      rejectToken(new Error('لم يتم استلام رمز الوصول من Google'));
+      return;
+    }
+
+    currentAccessToken = accessToken;
+    tokenExpiresAt = Date.now() + (Number(parsedUrl.searchParams.get('expires_in')) || 3500) * 1000;
+    Browser.close().catch(() => {});
+    resolveToken(currentAccessToken);
+  };
+
+  try {
+    listenerHandle = await App.addListener('appUrlOpen', handleUrl);
+    timeoutId = window.setTimeout(() => {
+      rejectToken(new Error('انتهت مهلة تسجيل الدخول إلى Google. حاول مرة أخرى.'));
+    }, TOKEN_REQUEST_TIMEOUT_MS);
+    await Browser.open({ url: authUrl.toString() });
+    return await tokenPromise;
+  } finally {
+    if (timeoutId) window.clearTimeout(timeoutId);
+    await listenerHandle?.remove();
+  }
+};
 
 /**
  * التأكد من تحميل سكربت Google Identity Services
@@ -20,7 +102,6 @@ const ensureGisScriptLoaded = () => {
     if (existingScript) {
       existingScript.addEventListener('load', () => resolve());
       existingScript.addEventListener('error', () => reject(new Error('تعذر تحميل مكتبة جوجل للمصادقة')));
-      // في حالة كان السكربت انتهى من التحميل قبل الربط
       if (window.google?.accounts?.oauth2) resolve();
       return;
     }
@@ -40,6 +121,10 @@ export const googleDriveService = {
    * الحصول على توكن الوصول من حساب Google
    */
   async getAccessToken(promptConsent = false) {
+    if (Capacitor.isNativePlatform()) {
+      return getNativeAccessToken(promptConsent);
+    }
+
     await ensureGisScriptLoaded();
 
     // إذا كان التوكن الحالي ساري المفعول ولم يطلب إعادة الموافقة
@@ -60,7 +145,6 @@ export const googleDriveService = {
             }
             if (response.access_token) {
               currentAccessToken = response.access_token;
-              // التوكن صالح عادة لـ 3600 ثانية
               const expiresInMs = (Number(response.expires_in) || 3500) * 1000;
               tokenExpiresAt = Date.now() + expiresInMs;
               resolve(currentAccessToken);
@@ -80,7 +164,7 @@ export const googleDriveService = {
     const timeout = new Promise((_, reject) => {
       window.setTimeout(() => {
         tokenClient = null;
-        reject(new Error("انتهت مهلة تسجيل الدخول إلى Google. حاول مرة أخرى."));
+        reject(new Error('انتهت مهلة تسجيل الدخول إلى Google. حاول مرة أخرى.'));
       }, TOKEN_REQUEST_TIMEOUT_MS);
     });
 
@@ -95,18 +179,18 @@ export const googleDriveService = {
     const backupData = await exportData();
 
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-    const fileName = `أقساطي_Backup_${timestamp}.json`;
+    const fileName = 'أقساطي_Backup_' + timestamp + '.json';
     const fileContent = JSON.stringify(backupData, null, 2);
 
     const metadata = {
       name: fileName,
       mimeType: 'application/json',
-      description: `نسخة احتياطية لتطبيق أقساطي - ${new Date().toLocaleString('ar-SA')}`
+      description: 'نسخة احتياطية لتطبيق أقساطي - ' + new Date().toLocaleString('ar-SA')
     };
 
     const boundary = '-------AqastiBackupBoundary' + Date.now();
-    const delimiter = `\r\n--${boundary}\r\n`;
-    const closeDelimiter = `\r\n--${boundary}--`;
+    const delimiter = '\r\n--' + boundary + '\r\n';
+    const closeDelimiter = '\r\n--' + boundary + '--';
 
     const multipartRequestBody =
       delimiter +
@@ -120,16 +204,16 @@ export const googleDriveService = {
     const response = await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart', {
       method: 'POST',
       headers: {
-        Authorization: `Bearer ${token}`,
-        'Content-Type': `multipart/related; boundary="${boundary}"`
+        Authorization: 'Bearer ' + token,
+        'Content-Type': 'multipart/related; boundary="' + boundary + '"'
       },
       body: multipartRequestBody
     });
 
     if (!response.ok) {
       const errorJson = await response.json().catch(() => ({}));
-      const msg = errorJson.error?.message || `فشل الرفع برمز حالة ${response.status}`;
-      throw new Error(`خطأ في Google Drive: ${msg}`);
+      const msg = errorJson.error?.message || 'فشل الرفع برمز حالة ' + response.status;
+      throw new Error('خطأ في Google Drive: ' + msg);
     }
 
     const createdFile = await response.json();
@@ -151,11 +235,11 @@ export const googleDriveService = {
     const token = await this.getAccessToken();
 
     const query = "(name contains 'أقساطي_Backup' or name contains 'Fazatak_Backup') and trashed = false";
-    const url = `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(query)}&orderBy=createdTime desc&pageSize=${limit}&fields=files(id,name,size,createdTime,modifiedTime)`;
+    const url = 'https://www.googleapis.com/drive/v3/files?q=' + encodeURIComponent(query) + '&orderBy=createdTime desc&pageSize=' + limit + '&fields=files(id,name,size,createdTime,modifiedTime)';
 
     const response = await fetch(url, {
       headers: {
-        Authorization: `Bearer ${token}`
+        Authorization: 'Bearer ' + token
       }
     });
 
@@ -174,10 +258,10 @@ export const googleDriveService = {
   async downloadBackup(fileId) {
     const token = await this.getAccessToken();
 
-    const url = `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`;
+    const url = 'https://www.googleapis.com/drive/v3/files/' + fileId + '?alt=media';
     const response = await fetch(url, {
       headers: {
-        Authorization: `Bearer ${token}`
+        Authorization: 'Bearer ' + token
       }
     });
 
