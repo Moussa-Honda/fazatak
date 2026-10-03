@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Returning to Aqsaati</title>
+  <style>body{font-family:system-ui,sans-serif;padding:2rem;text-align:center;color:#334155}a{color:#0f766e}</style>
+</head>
+<body>
+  <p id="status">Returning to the Aqsaati app...</p>
+  <script>
+    (function () {
+      var raw = window.location.hash.slice(1) || window.location.search.slice(1);
+      var params = new URLSearchParams(raw);
+      var hasResult = params.has('access_token') || params.has('error');
+      var status = document.getElementById('status');
+
+      if (!hasResult) {
+        status.textContent = 'No Google sign-in result was received.';
+        return;
+      }
+
+      var deepLink = 'com.aqsaati.installments://oauth?' + params.toString();
+      status.textContent = 'Returning to Aqsaati...';
+      window.location.replace(deepLink);
+      window.setTimeout(function () {
+        status.innerHTML = 'If Aqsaati did not open, <a href="' + deepLink + '">tap here to return</a>.';
+      }, 1500);
+    }());
+  </script>
+</body>
+</html>
