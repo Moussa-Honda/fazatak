@@ -3,6 +3,27 @@
   "name": "fazatak",
   "main": "worker.js",
   "compatibility_date": "2026-09-03",
+  "vars": {
+    "SUPABASE_URL": "https://ehufhgulrubgnntmdhxn.supabase.co"
+  },
+  "ratelimits": [
+    {
+      "name": "AUTH_ACCOUNT_LIMITER",
+      "namespace_id": "2026101402",
+      "simple": {
+        "limit": 5,
+        "period": 60
+      }
+    },
+    {
+      "name": "AUTH_IP_LIMITER",
+      "namespace_id": "2026101401",
+      "simple": {
+        "limit": 30,
+        "period": 60
+      }
+    }
+  ],
   "observability": {
     "enabled": true
   },
