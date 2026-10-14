@@ -778,7 +778,8 @@ const withCors = (response, request) => {
   const headers = new Headers(response.headers);
   const origin = request.headers.get('Origin');
   const isProjectPreview = /^https:\/\/[a-z0-9-]+\.fazatak\.pages\.dev$/.test(origin || '');
-  if (origin && (CORS_ORIGINS.has(origin) || isProjectPreview)) {
+  const isLocalDevelopmentOrigin = /^https?:\/\/(?:localhost|127\.0\.0\.1)(?::\d+)?$/.test(origin || '');
+  if (origin && (CORS_ORIGINS.has(origin) || isProjectPreview || isLocalDevelopmentOrigin)) {
     headers.set('Access-Control-Allow-Origin', origin);
     headers.set('Access-Control-Allow-Headers', 'Authorization, Content-Type');
     headers.set('Access-Control-Allow-Methods', 'GET, POST, PUT, OPTIONS');

@@ -1,10 +1,6 @@
 const AUTH_TOKEN_KEY = 'fazatak_session_token';
 const configuredBaseUrl = String(import.meta.env?.VITE_API_BASE_URL || '').trim().replace(/\/$/, '');
-const location = typeof window === 'undefined' ? null : window.location;
-const nativeOrLocal = location && (
-  location.protocol === 'capacitor:' || location.hostname === 'localhost'
-);
-const API_BASE_URL = configuredBaseUrl || (nativeOrLocal ? 'https://fazatak.pages.dev' : '');
+const API_BASE_URL = configuredBaseUrl || 'https://fazatak.honda-druid.workers.dev';
 
 export const getSessionToken = () => {
   try {
