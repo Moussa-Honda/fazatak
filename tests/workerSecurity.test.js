@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import {
+import worker, {
   getDueCandidate,
   handleAuthApi,
   handlePushApi,
@@ -83,6 +83,16 @@ const putJson = (url, body, headers = {}) => new Request(url, {
   method: 'PUT',
   headers: { 'Content-Type': 'application/json', ...headers },
   body: JSON.stringify(body),
+});
+
+test('Worker protects the API and allows localhost Vite origins', async () => {
+  const response = await worker.fetch(new Request('https://fazatak.honda-druid.workers.dev/api/auth/profile', {
+    headers: { Origin: 'http://localhost:5173' },
+  }), {});
+
+  assert.equal(response.status, 401);
+  assert.equal(response.headers.get('Access-Control-Allow-Origin'), 'http://localhost:5173');
+  assert.equal(response.headers.get('Cache-Control'), 'no-store');
 });
 
 test('password login keeps the legacy account and never returns its hashes', async () => {
