@@ -1,5 +1,5 @@
 import { Capacitor } from '@capacitor/core';
-import { authService } from './authService';
+import { apiRequest, getSessionToken } from './apiClient';
 
 const SUBSCRIPTION_STORAGE_KEY = 'fazatak_web_push_subscription';
 const VAPID_KEY_STORAGE_KEY = 'fazatak_web_push_vapid_key';
@@ -73,18 +73,13 @@ const fromBase64Url = (value) => {
 const getErrorCode = (error) => error?.code || error?.message || 'unknown';
 
 const getConfig = async () => {
-  const response = await fetch('/api/push/config', {
-    cache: 'no-store',
-    headers: { Accept: 'application/json' },
-  });
-
-  if (!response.ok) {
-    const error = new Error(response.status === 503 ? 'not_configured' : 'push_config_failed');
-    error.code = response.status === 503 ? 'not_configured' : 'push_config_failed';
+  let config;
+  try {
+    config = await apiRequest('push/config', { token: '' });
+  } catch (error) {
+    error.code = error.status === 503 ? 'not_configured' : 'push_config_failed';
     throw error;
   }
-
-  const config = await response.json();
   if (!config.vapidPublicKey) {
     const error = new Error('push_not_configured');
     error.code = 'not_configured';
@@ -94,6 +89,15 @@ const getConfig = async () => {
 };
 
 const getRegistration = async () => navigator.serviceWorker.ready;
+
+const getAuthHeaders = async () => {
+  if (!getSessionToken()) {
+    const error = new Error('not_authenticated');
+    error.code = 'not_authenticated';
+    throw error;
+  }
+  return true;
+};
 
 const serializeSubscription = (subscription) => {
   const json = subscription.toJSON();
@@ -109,27 +113,18 @@ const serializeSubscription = (subscription) => {
 
 const saveSubscription = async (subscription) => {
   const serialized = serializeSubscription(subscription);
-  const phone = authService.getCurrentUser()?.phone;
-
-  if (!phone) {
-    const error = new Error('not_authenticated');
-    error.code = 'not_authenticated';
-    throw error;
-  }
-
-  const response = await fetch('/api/push/subscribe', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-    body: JSON.stringify({
-      userPhone: phone,
+  await getAuthHeaders();
+  try {
+    await apiRequest('push/subscribe', {
+      method: 'POST',
+      body: {
       timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'Asia/Riyadh',
       subscription: serialized,
-    }),
-  });
-
-  if (!response.ok) {
+      },
+    });
+  } catch {
     const error = new Error('push_registration_failed');
-    error.code = response.status === 503 ? 'push_service_unavailable' : 'registration_failed';
+    error.code = 'registration_failed';
     throw error;
   }
 
@@ -191,10 +186,10 @@ export const webPushService = {
       const subscription = await this.getSubscription();
       const endpoint = subscription?.endpoint || readStoredSubscription()?.endpoint;
       if (endpoint) {
-        await fetch('/api/push/unsubscribe', {
+        await getAuthHeaders();
+        await apiRequest('push/unsubscribe', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-          body: JSON.stringify({ endpoint }),
+          body: { endpoint },
         });
       }
       if (subscription) await subscription.unsubscribe();
@@ -211,13 +206,15 @@ export const webPushService = {
     const result = await this.ensureSubscription({ requestPermission: true });
     if (!result.granted) return { sent: false, permission: result.reason };
 
-    const response = await fetch('/api/push/test', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-      body: JSON.stringify({ endpoint: result.subscription.endpoint }),
-    });
-
-    if (!response.ok) return { sent: false, permission: 'send_failed' };
+    await getAuthHeaders();
+    try {
+      await apiRequest('push/test', {
+        method: 'POST',
+        body: { endpoint: result.subscription.endpoint },
+      });
+    } catch {
+      return { sent: false, permission: 'send_failed' };
+    }
     return { sent: true, permission: 'granted' };
   },
 
