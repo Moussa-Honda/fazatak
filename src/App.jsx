@@ -6,6 +6,7 @@ import { authService } from './services/authService';
 import { cloudSyncService } from './services/cloudSyncService';
 import licenseService from './services/license';
 import billingService from './services/billingService';
+import { webPushService } from './services/webPushService';
 import { settingsService } from './services/database';
 import { Capacitor } from '@capacitor/core';
 import { PrivacyScreen } from '@capacitor-community/privacy-screen';
@@ -122,7 +123,7 @@ function App() {
   const checkAppLicense = async () => {
     try {
       // 1. التحقق أولاً من جلسة العميل المربوطة برقم الهاتف
-      const cachedUser = authService.getCurrentUser();
+      const cachedUser = await authService.restoreSession();
 
       if (cachedUser && cachedUser.phone) {
         // Fetch the central account entitlement before applying local/device fallbacks.
@@ -196,7 +197,12 @@ function App() {
     setDecryptionKey('FAZATAK_SECURE_KEY');
   };
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
+    try {
+      await webPushService.unsubscribe();
+    } catch (error) {
+      console.warn('Push unsubscribe note:', error);
+    }
     authService.logout();
     setCurrentUser(null);
     setIsLicensed(false);
