@@ -6,11 +6,11 @@ const sanitizeSupabaseUrl = (url) => {
   if (!trimmed) return null;
 
   // Extract from markdown link if pasted as [url](url) or similar
-  const markdownMatch = trimmed.match(/\((https?:\/\/[^\)]+)\)/) || trimmed.match(/\[(https?:\/\/[^\]]+)\]/);
+  const markdownMatch = trimmed.match(/\((https?:\/\/[^)]+)\)/) || trimmed.match(/\[(https?:\/\/[^\]]+)\]/);
   if (markdownMatch) {
     trimmed = markdownMatch[1];
   }
-  trimmed = trimmed.replace(/[\[\]\(\)\s]/g, '');
+  trimmed = trimmed.replaceAll('[', '').replaceAll(']', '').replace(/[()\s]/g, '');
 
   // Auto-prepend https:// if protocol was omitted
   const withProtocol = (!trimmed.startsWith('http://') && !trimmed.startsWith('https://'))
@@ -30,7 +30,7 @@ const sanitizeSupabaseUrl = (url) => {
 
 const sanitizeSupabaseKey = (key) => {
   if (!key || typeof key !== 'string') return null;
-  const cleaned = key.trim().replace(/[\[\]\(\)\`\'\"\s]/g, '');
+  const cleaned = key.trim().replaceAll('[', '').replaceAll(']', '').replace(/[()`'"\s]/g, '');
   return cleaned.length > 10 ? cleaned : null;
 };
 
@@ -71,13 +71,11 @@ export const testSupabaseConnection = async () => {
   }
 
   try {
-    // محاولة قراءة خفيفة للتحقق من الاتصال
-    const { error } = await supabase.from('fazatak_backups').select('id').limit(1);
-    if (error && error.code !== 'PGRST116' && error.code !== '42P01') {
-      // 42P01 يعني أن الجدول غير منشأ بعد لكن الاتصال والتوثيق سليم 100%
-      return { ok: false, error: error.message };
-    }
-    return { ok: true, tableReady: error?.code !== '42P01' };
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) return { ok: false, error: 'يلزم تسجيل الدخول للتحقق من الحساب.' };
+    const { error } = await supabase.rpc('fazatak_get_my_profile');
+    if (error) return { ok: false, error: error.message };
+    return { ok: true, tableReady: true };
   } catch (err) {
     return { ok: false, error: err.message || 'فشل الاتصال بـ Supabase' };
   }
@@ -91,7 +89,11 @@ export const saveCloudBackup = async (backupPayload) => {
     throw new Error('Supabase غير مهيأ، يرجى ضبط VITE_SUPABASE_URL و VITE_SUPABASE_PUBLISHABLE_KEY');
   }
 
+  const { data: { session } } = await supabase.auth.getSession();
+  if (!session) throw new Error('يلزم تسجيل الدخول الآمن لحفظ نسخة سحابية.');
+
   const record = {
+    owner_user_id: session.user.id,
     file_name: backupPayload.fileName || 'أقساطي_Backup.json',
     version: backupPayload.version || '2.0-offline',
     records_count: Object.values(backupPayload.counts || {}).reduce((a, b) => a + b, 0),
@@ -103,14 +105,30 @@ export const saveCloudBackup = async (backupPayload) => {
   const { data, error } = await supabase
     .from('fazatak_backups')
     .insert([record])
-    .select();
+    .select('id, created_at')
+    .single();
 
   if (error) {
     console.error('Supabase backup error:', error);
     throw new Error(`فشل رفع النسخة إلى Supabase: ${error.message}`);
   }
 
-  return { success: true, record: data?.[0] };
+  const { data: oldRecords } = await supabase
+    .from('fazatak_backups')
+    .select('id')
+    .eq('owner_user_id', session.user.id)
+    .order('created_at', { ascending: false })
+    .range(10, 1000);
+
+  if (oldRecords?.length) {
+    await supabase
+      .from('fazatak_backups')
+      .delete()
+      .eq('owner_user_id', session.user.id)
+      .in('id', oldRecords.map((item) => item.id));
+  }
+
+  return { success: true, record: data };
 };
 
 /**
@@ -119,11 +137,15 @@ export const saveCloudBackup = async (backupPayload) => {
 export const listCloudBackups = async (limit = 10) => {
   if (!supabase) return [];
 
+  const { data: { session } } = await supabase.auth.getSession();
+  if (!session) return [];
+
   const { data, error } = await supabase
     .from('fazatak_backups')
     .select('id, file_name, version, records_count, tables_count, created_at')
+    .eq('owner_user_id', session.user.id)
     .order('created_at', { ascending: false })
-    .limit(limit);
+    .limit(Math.max(1, Math.min(Number(limit) || 10, 50)));
 
   if (error) {
     console.warn('Failed to list cloud backups:', error.message);
@@ -139,10 +161,14 @@ export const listCloudBackups = async (limit = 10) => {
 export const getCloudBackupById = async (id) => {
   if (!supabase) throw new Error('Supabase غير مهيأ');
 
+  const { data: { session } } = await supabase.auth.getSession();
+  if (!session) throw new Error('يلزم تسجيل الدخول الآمن لاستعادة نسخة سحابية.');
+
   const { data, error } = await supabase
     .from('fazatak_backups')
     .select('backup_data')
     .eq('id', id)
+    .eq('owner_user_id', session.user.id)
     .single();
 
   if (error) {

@@ -1,5 +1,5 @@
 import { Capacitor } from '@capacitor/core';
-import { authService } from './authService';
+import { supabase } from './supabase';
 
 const SUBSCRIPTION_STORAGE_KEY = 'fazatak_web_push_subscription';
 const VAPID_KEY_STORAGE_KEY = 'fazatak_web_push_vapid_key';
@@ -95,6 +95,16 @@ const getConfig = async () => {
 
 const getRegistration = async () => navigator.serviceWorker.ready;
 
+const getAuthHeaders = async () => {
+  const { data: { session } } = await supabase?.auth.getSession() || { data: { session: null } };
+  if (!session) {
+    const error = new Error('not_authenticated');
+    error.code = 'not_authenticated';
+    throw error;
+  }
+  return { Authorization: `Bearer ${session.access_token}` };
+};
+
 const serializeSubscription = (subscription) => {
   const json = subscription.toJSON();
   return {
@@ -109,19 +119,12 @@ const serializeSubscription = (subscription) => {
 
 const saveSubscription = async (subscription) => {
   const serialized = serializeSubscription(subscription);
-  const phone = authService.getCurrentUser()?.phone;
-
-  if (!phone) {
-    const error = new Error('not_authenticated');
-    error.code = 'not_authenticated';
-    throw error;
-  }
+  const authHeaders = await getAuthHeaders();
 
   const response = await fetch('/api/push/subscribe', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+    headers: { ...authHeaders, 'Content-Type': 'application/json', Accept: 'application/json' },
     body: JSON.stringify({
-      userPhone: phone,
       timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'Asia/Riyadh',
       subscription: serialized,
     }),
@@ -191,9 +194,10 @@ export const webPushService = {
       const subscription = await this.getSubscription();
       const endpoint = subscription?.endpoint || readStoredSubscription()?.endpoint;
       if (endpoint) {
+        const authHeaders = await getAuthHeaders();
         await fetch('/api/push/unsubscribe', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+          headers: { ...authHeaders, 'Content-Type': 'application/json', Accept: 'application/json' },
           body: JSON.stringify({ endpoint }),
         });
       }
@@ -211,9 +215,10 @@ export const webPushService = {
     const result = await this.ensureSubscription({ requestPermission: true });
     if (!result.granted) return { sent: false, permission: result.reason };
 
+    const authHeaders = await getAuthHeaders();
     const response = await fetch('/api/push/test', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+      headers: { ...authHeaders, 'Content-Type': 'application/json', Accept: 'application/json' },
       body: JSON.stringify({ endpoint: result.subscription.endpoint }),
     });
 

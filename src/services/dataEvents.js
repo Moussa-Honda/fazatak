@@ -7,7 +7,7 @@ export const notifyDataChanged = (detail = {}) => {
   try {
     localStorage.setItem('fazatak_has_pending_cloud_sync', 'true');
     localStorage.setItem('fazatak_last_local_mutation', Date.now().toString());
-  } catch (e) {
+  } catch {
     // Ignore storage quota errors
   }
 
