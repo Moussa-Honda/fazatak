@@ -1,5 +1,3 @@
-const DEFAULT_SUPABASE_URL = 'https://ehufhgulrubgnntmdhxn.supabase.co';
-const DEFAULT_SUPABASE_KEY = 'sb_publishable_5O9wP_WCo3zqIkNzI_8Cpg_hYFM9NGC';
 const PUSH_TABLE = 'fazatak_push_subscriptions';
 
 const jsonResponse = (body, status = 200) => new Response(JSON.stringify(body), {
@@ -10,43 +8,63 @@ const jsonResponse = (body, status = 200) => new Response(JSON.stringify(body), 
   },
 });
 
-const getSupabaseConfig = (env) => ({
-  url: env.SUPABASE_URL || DEFAULT_SUPABASE_URL,
-  key: env.SUPABASE_ANON_KEY || DEFAULT_SUPABASE_KEY,
-});
+const getSupabaseConfig = (env) => {
+  if (!env.SUPABASE_URL || !env.SUPABASE_SERVICE_ROLE_KEY) {
+    throw new Error('Supabase Worker secrets are not configured');
+  }
+  return { url: env.SUPABASE_URL, key: env.SUPABASE_SERVICE_ROLE_KEY };
+};
 
 const supabaseRequest = async (env, path, init = {}) => {
   const { url, key } = getSupabaseConfig(env);
-  const configs = [
-    { url, key },
-    { url: DEFAULT_SUPABASE_URL, key: DEFAULT_SUPABASE_KEY },
-  ].filter((config, index, all) => (
-    config.url && config.key && all.findIndex((item) => item.url === config.url && item.key === config.key) === index
-  ));
+  const headers = new Headers(init.headers || {});
+  headers.set('apikey', key);
+  headers.set('Authorization', `Bearer ${key}`);
+  if (!headers.has('Content-Type')) headers.set('Content-Type', 'application/json');
 
-  for (const config of configs) {
-    const headers = new Headers(init.headers || {});
-    headers.set('apikey', config.key);
-    headers.set('Authorization', `Bearer ${config.key}`);
-    if (!headers.has('Content-Type')) headers.set('Content-Type', 'application/json');
+  const response = await fetch(`${url}/rest/v1/${path}`, { ...init, headers });
+  if (!response.ok) throw new Error(`Supabase ${response.status}: ${await response.text()}`);
+  const body = await response.text();
+  return body ? JSON.parse(body) : null;
+};
 
-    const response = await fetch(`${config.url}/rest/v1/${path}`, { ...init, headers });
-    if (response.ok) {
-      const body = await response.text();
-      return body ? JSON.parse(body) : null;
-    }
+const getVerifiedUser = async (request, env) => {
+  const token = request.headers.get('Authorization')?.match(/^Bearer\s+(.+)$/i)?.[1];
+  const url = env.SUPABASE_URL;
+  const apiKey = env.SUPABASE_PUBLISHABLE_KEY || env.SUPABASE_ANON_KEY;
+  if (!token || !url || !apiKey) return null;
 
-    // A stale Cloudflare URL/key should not prevent Push registration.
-    if (configs.length > 1 && (response.status === 401 || response.status === 403 || response.status === 404 || response.status >= 500)) {
-      continue;
-    }
-    throw new Error(`Supabase ${response.status}: ${await response.text()}`);
+  const response = await fetch(`${url}/auth/v1/user`, {
+    headers: { apikey: apiKey, Authorization: `Bearer ${token}` },
+  });
+  if (!response.ok) return null;
+  const user = await response.json();
+  if (!user?.id || !user.phone || !user.phone_confirmed_at) return null;
+  return { id: user.id, phone: user.phone };
+};
+
+const isAllowedPushEndpoint = (endpoint) => {
+  try {
+    const parsed = new URL(endpoint);
+    const host = parsed.hostname.toLowerCase();
+    const allowedHost = host === 'fcm.googleapis.com'
+      || host === 'web.push.apple.com'
+      || host.endsWith('.push.apple.com')
+      || host === 'updates.push.services.mozilla.com'
+      || host.endsWith('.push.services.mozilla.com')
+      || host.endsWith('.notify.windows.com');
+    return parsed.protocol === 'https:'
+      && !parsed.username
+      && !parsed.password
+      && (!parsed.port || parsed.port === '443')
+      && allowedHost;
+  } catch {
+    return false;
   }
-
-  throw new Error('Supabase request failed');
 };
 
 const readJson = async (request) => {
+  if (Number(request.headers.get('content-length') || 0) > 128_000) return null;
   try {
     return await request.json();
   } catch {
@@ -60,8 +78,8 @@ const isValidSubscription = (subscription) => Boolean(
   subscription?.keys?.auth
 );
 
-const subscriptionRecord = (payload) => ({
-  user_phone: String(payload.userPhone || '').trim(),
+const subscriptionRecord = (payload, ownerUserId) => ({
+  owner_user_id: ownerUserId,
   endpoint: String(payload.subscription.endpoint),
   subscription: payload.subscription,
   expiration_time: payload.subscription.expirationTime || null,
@@ -80,25 +98,43 @@ const handlePushApi = async (request, env) => {
     return jsonResponse({ vapidPublicKey: env.VAPID_PUBLIC_KEY });
   }
 
+  const user = await getVerifiedUser(request, env);
+  if (!user) return jsonResponse({ error: 'authentication_required' }, 401);
+
   if (url.pathname === '/api/push/subscribe' && request.method === 'POST') {
     const payload = await readJson(request);
-    if (!payload?.userPhone || !isValidSubscription(payload.subscription)) {
+    if (!isValidSubscription(payload?.subscription)
+      || !isAllowedPushEndpoint(payload.subscription.endpoint)) {
       return jsonResponse({ error: 'invalid_subscription' }, 400);
     }
 
-    await supabaseRequest(env, `${PUSH_TABLE}?on_conflict=endpoint`, {
-      method: 'POST',
-      headers: { Prefer: 'resolution=merge-duplicates,return=minimal' },
-      body: JSON.stringify([subscriptionRecord(payload)]),
+    const endpointFilter = encodeURIComponent(payload.subscription.endpoint);
+    const existing = await supabaseRequest(
+      env,
+      `${PUSH_TABLE}?endpoint=eq.${endpointFilter}&select=owner_user_id`
+    );
+    if (existing?.length && existing[0].owner_user_id !== user.id) {
+      return jsonResponse({ error: 'subscription_already_owned' }, 409);
+    }
+
+    const route = existing?.length
+      ? `${PUSH_TABLE}?owner_user_id=eq.${user.id}&endpoint=eq.${endpointFilter}`
+      : PUSH_TABLE;
+    await supabaseRequest(env, route, {
+      method: existing?.length ? 'PATCH' : 'POST',
+      headers: { Prefer: 'return=minimal' },
+      body: JSON.stringify(existing?.length
+        ? subscriptionRecord(payload, user.id)
+        : [subscriptionRecord(payload, user.id)]),
     });
     return jsonResponse({ ok: true });
   }
 
   if (url.pathname === '/api/push/unsubscribe' && request.method === 'POST') {
     const payload = await readJson(request);
-    if (!payload?.endpoint) return jsonResponse({ error: 'invalid_endpoint' }, 400);
+    if (!isAllowedPushEndpoint(payload?.endpoint)) return jsonResponse({ error: 'invalid_endpoint' }, 400);
 
-    await supabaseRequest(env, `${PUSH_TABLE}?endpoint=eq.${encodeURIComponent(payload.endpoint)}`, {
+    await supabaseRequest(env, `${PUSH_TABLE}?owner_user_id=eq.${user.id}&endpoint=eq.${encodeURIComponent(payload.endpoint)}`, {
       method: 'DELETE',
       headers: { Prefer: 'return=minimal' },
     });
@@ -107,11 +143,11 @@ const handlePushApi = async (request, env) => {
 
   if (url.pathname === '/api/push/test' && request.method === 'POST') {
     const payload = await readJson(request);
-    if (!payload?.endpoint) return jsonResponse({ error: 'invalid_endpoint' }, 400);
+    if (!isAllowedPushEndpoint(payload?.endpoint)) return jsonResponse({ error: 'invalid_endpoint' }, 400);
 
     const rows = await supabaseRequest(
       env,
-      `${PUSH_TABLE}?endpoint=eq.${encodeURIComponent(payload.endpoint)}&select=endpoint,subscription`
+      `${PUSH_TABLE}?owner_user_id=eq.${user.id}&endpoint=eq.${encodeURIComponent(payload.endpoint)}&select=endpoint,subscription`
     );
     const record = rows?.[0];
     if (!record) return jsonResponse({ error: 'subscription_not_found' }, 404);
@@ -122,7 +158,7 @@ const handlePushApi = async (request, env) => {
       tag: 'fazatak-test',
       data: { url: '/' },
     });
-    if (result.expired) await deleteSubscription(env, record.endpoint);
+    if (result.expired) await deleteSubscription(env, record.endpoint, user.id);
     return jsonResponse({ ok: result.sent }, result.sent ? 200 : 502);
   }
 
@@ -305,13 +341,13 @@ const sendWebPush = async (env, subscription, payload) => {
     });
     return { sent: response.ok, expired: response.status === 404 || response.status === 410 };
   } catch (error) {
-    console.warn('[Push] Send failed:', error);
+    console.warn('[Push] Send failed:', error?.name || 'unknown error');
     return { sent: false, expired: false };
   }
 };
 
-const deleteSubscription = async (env, endpoint) => {
-  await supabaseRequest(env, `${PUSH_TABLE}?endpoint=eq.${encodeURIComponent(endpoint)}`, {
+const deleteSubscription = async (env, endpoint, ownerUserId) => {
+  await supabaseRequest(env, `${PUSH_TABLE}?owner_user_id=eq.${ownerUserId}&endpoint=eq.${encodeURIComponent(endpoint)}`, {
     method: 'DELETE',
     headers: { Prefer: 'return=minimal' },
   });
@@ -365,7 +401,6 @@ const getDueCandidate = (backupPayload, now, timezone) => {
     const key = `${customer.id}:${bucket}`;
     const existing = groups.get(key) || {
       customerId: customer.id,
-      customerName: customer.name || 'عميل',
       bucket,
       count: 0,
       amount: 0,
@@ -380,21 +415,15 @@ const getDueCandidate = (backupPayload, now, timezone) => {
   }
 
   const entries = [...groups.values()].sort((left, right) => (
-    right.daysLate - left.daysLate || right.amount - left.amount || left.customerName.localeCompare(right.customerName)
+    right.daysLate - left.daysLate || right.amount - left.amount
   ));
   if (entries.length === 0) return null;
 
   const late = entries.filter((entry) => entry.bucket === 'late');
-  const today = entries.filter((entry) => entry.bucket === 'today');
-  const totalAmount = entries.reduce((sum, entry) => sum + entry.amount, 0);
-  const names = entries.slice(0, 3).map((entry) => entry.customerName).join('، ');
-  const parts = [];
-  if (late.length) parts.push(`${late.length} عميل متأخر`);
-  if (today.length) parts.push(`${today.length} عميل مستحق اليوم`);
   const dateKey = `${localNow.year}-${localNow.month}-${localNow.day}`;
   const signature = entries.map((entry) => `${entry.customerId}:${entry.bucket}:${entry.count}:${Math.round(entry.amount)}`).join('|');
-  const title = late.length ? 'عملاء متأخرون عن السداد' : 'أقساط مستحقة اليوم';
-  const body = `${parts.join(' • ')} — الإجمالي ${Math.round(totalAmount).toLocaleString('en-US')} ريال${names ? `\n${names}` : ''}`;
+  const title = late.length ? 'تذكير بالمتابعة' : 'تذكير باستحقاق اليوم';
+  const body = 'افتح تطبيق أقساطي لمراجعة التفاصيل.';
 
   return {
     key: `${dateKey}:${signature}`,
@@ -408,28 +437,32 @@ const getDueCandidate = (backupPayload, now, timezone) => {
 const runScheduledNotifications = async (env) => {
   if (!env.VAPID_PRIVATE_KEY || !env.VAPID_PUBLIC_KEY) return;
 
-  const subscriptions = await supabaseRequest(env, `${PUSH_TABLE}?select=endpoint,user_phone,subscription,timezone,last_notification_key`);
+  const subscriptions = await supabaseRequest(
+    env,
+    `${PUSH_TABLE}?owner_user_id=not.is.null&select=owner_user_id,endpoint,subscription,timezone,last_notification_key`
+  );
   for (const record of subscriptions || []) {
     try {
+      if (!record.owner_user_id || !isAllowedPushEndpoint(record.endpoint)) continue;
       const rows = await supabaseRequest(
         env,
-        `fazatak_user_data?user_phone=eq.${encodeURIComponent(record.user_phone)}&select=backup_payload&limit=1`
+        `fazatak_user_data?owner_user_id=eq.${record.owner_user_id}&select=backup_payload&limit=1`
       );
       const candidate = getDueCandidate(rows?.[0]?.backup_payload, new Date(), record.timezone);
       if (!candidate || candidate.key === record.last_notification_key) continue;
 
       const result = await sendWebPush(env, record.subscription, candidate);
       if (result.expired) {
-        await deleteSubscription(env, record.endpoint);
+        await deleteSubscription(env, record.endpoint, record.owner_user_id);
       } else if (result.sent) {
-        await supabaseRequest(env, `${PUSH_TABLE}?endpoint=eq.${encodeURIComponent(record.endpoint)}`, {
+        await supabaseRequest(env, `${PUSH_TABLE}?owner_user_id=eq.${record.owner_user_id}&endpoint=eq.${encodeURIComponent(record.endpoint)}`, {
           method: 'PATCH',
           headers: { Prefer: 'return=minimal' },
           body: JSON.stringify({ last_notification_key: candidate.key, updated_at: new Date().toISOString() }),
         });
       }
     } catch (error) {
-      console.warn('[Push] Scheduled notification failed:', error);
+      console.warn('[Push] Scheduled notification failed:', error?.name || 'unknown error');
     }
   }
 };
@@ -441,7 +474,7 @@ export default {
       try {
         return await handlePushApi(request, env);
       } catch (error) {
-        console.error('[Push API] Request failed:', error);
+        console.error('[Push API] Request failed:', error?.name || 'unknown error');
         return jsonResponse({ error: 'push_service_unavailable' }, 503);
       }
     }
