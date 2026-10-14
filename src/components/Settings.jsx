@@ -7,7 +7,6 @@ import billingService from '../services/billingService';
 import { PrivacyScreen } from '@capacitor-community/privacy-screen';
 import { Clipboard } from '@capacitor/clipboard';
 import { useLiveRefresh } from '../hooks/useLiveRefresh';
-import { cloudSyncService, SYNC_STATUS_EVENT, LAST_SYNC_KEY } from '../services/cloudSyncService';
 import { googleDriveService } from '../services/googleDriveService';
 import { importData, formatDate, formatFileSize } from '../services/backupService';
 import { notifyDataChanged } from '../services/dataEvents';
@@ -84,10 +83,6 @@ const PdfMarkEditor = ({ label, image, text, error, onFileChange, onClear, onTex
 );
 
 const Settings = ({ onSettingsChange, onLicenseRenewed, currentUser, onLogout, isReadOnly = false, onRenewalRequest }) => {
-  const [passwordForm, setPasswordForm] = useState({ current: '', next: '', confirm: '' });
-  const [passwordLoading, setPasswordLoading] = useState(false);
-  const [passwordMessage, setPasswordMessage] = useState('');
-  const [passwordError, setPasswordError] = useState('');
   const [appLockEnabled, setAppLockEnabled] = useState(() => authService.isAppLockEnabled(currentUser?.phone));
   const [appLockCurrentPin, setAppLockCurrentPin] = useState('');
   const [appLockPin, setAppLockPin] = useState('');
@@ -161,27 +156,6 @@ const Settings = ({ onSettingsChange, onLicenseRenewed, currentUser, onLogout, i
     }
   };
 
-  const [syncStatusText, setSyncStatusText] = useState('محفوظ مع السحابة تلقائياً ✓');
-  const [isSyncingLive, setIsSyncingLive] = useState(false);
-
-  useEffect(() => {
-    const handleSyncEvent = (e) => {
-      const { status } = e.detail || {};
-      if (status === 'syncing' || status === 'pending') {
-        setIsSyncingLive(true);
-        setSyncStatusText('جاري الحفظ التلقائي في السحابة...');
-      } else if (status === 'synced') {
-        setIsSyncingLive(false);
-        setSyncStatusText('تم الحفظ التلقائي في السحابة بنجاح ✓');
-      } else if (status === 'error') {
-        setIsSyncingLive(false);
-        setSyncStatusText('بانتظار اتصال الإنترنت للمزامنة...');
-      }
-    };
-
-    window.addEventListener(SYNC_STATUS_EVENT, handleSyncEvent);
-    return () => window.removeEventListener(SYNC_STATUS_EVENT, handleSyncEvent);
-  }, []);
   const [showCustodySection, setShowCustodySection] = useState(true);
   const [quickPaymentMode, setQuickPaymentMode] = useState(false);
   const [sortCustomersAlphabetically, setSortCustomersAlphabetically] = useState(false);
@@ -363,7 +337,8 @@ const Settings = ({ onSettingsChange, onLicenseRenewed, currentUser, onLogout, i
     } catch (error) {
       const errCode = error.message || '';
       let msg = 'تعذر تجديد الاشتراك. تأكد من الكود وحاول مرة أخرى.';
-      if (errCode.includes('ERR_WRONG_CODE')) msg = 'هذا الكود غير صالح لهذا الحساب.';
+      if (errCode.includes('ERR_SERVER_VALIDATION_REQUIRED')) msg = 'تجديد الأكواد متوقف مؤقتًا لحماية الحساب. استخدم Google Play أو تواصل مع الدعم.';
+      else if (errCode.includes('ERR_WRONG_CODE')) msg = 'هذا الكود غير صالح لهذا الحساب.';
       else if (errCode.includes('ERR_WRONG_ACCOUNT') || errCode.includes('ERR_ACCOUNT_NUMBER_REQUIRED')) msg = 'هذا الكود غير صالح لهذا الحساب.';
       else if (errCode.includes('ERR_INVALID_FORMAT')) msg = 'تنسيق الكود غير صحيح. يجب أن يكون 9 أرقام.';
       else if (errCode.includes('ERR_TIME_TAMPERED')) msg = 'تم اكتشاف تلاعب في وقت الجهاز.';
@@ -431,28 +406,6 @@ const Settings = ({ onSettingsChange, onLicenseRenewed, currentUser, onLogout, i
       setter(value);
     } finally {
       setUpdatingSetting(null);
-    }
-  };
-
-  const handleChangePassword = async (event) => {
-    event.preventDefault();
-    setPasswordMessage('');
-    setPasswordError('');
-
-    if (passwordForm.next !== passwordForm.confirm) {
-      setPasswordError('كلمة المرور الجديدة وتأكيدها غير متطابقين');
-      return;
-    }
-
-    setPasswordLoading(true);
-    try {
-      const result = await authService.changePassword(passwordForm.current, passwordForm.next);
-      setPasswordMessage(result.message);
-      setPasswordForm({ current: '', next: '', confirm: '' });
-    } catch (error) {
-      setPasswordError(error.message || 'تعذر تغيير كلمة المرور');
-    } finally {
-      setPasswordLoading(false);
     }
   };
 
@@ -853,55 +806,9 @@ const Settings = ({ onSettingsChange, onLicenseRenewed, currentUser, onLogout, i
       {/* Account Security Section */}
       <div className="bg-slate-800 rounded-2xl p-6 border border-slate-700 shadow-sm">
         <h3 className="text-lg font-bold text-white mb-1 flex items-center gap-2">🔐 أمان الحساب</h3>
-        <p className="text-slate-400 text-xs mb-4">
-          تغيير كلمة المرور للحساب <span dir="ltr" className="text-slate-300">{currentUser?.phone || ''}</span>
+        <p className="mb-4 text-xs leading-6 text-slate-400">
+          الدخول إلى الحساب يتم برمز تحقق يُرسل إلى رقم الهاتف الموثّق. لا تخزن كلمة مرور الحساب في التطبيق.
         </p>
-        <form onSubmit={handleChangePassword} className="space-y-3">
-          <div>
-            <label className="block text-sm text-slate-400 mb-2">كلمة المرور الحالية</label>
-            <input
-              type="password"
-              value={passwordForm.current}
-              onChange={(event) => setPasswordForm((form) => ({ ...form, current: event.target.value }))}
-              autoComplete="current-password"
-              className="w-full bg-slate-900 border border-slate-600 rounded-xl px-4 py-3 text-white placeholder-slate-500 focus:border-blue-500 focus:outline-none transition-colors"
-              placeholder="أدخل كلمة المرور الحالية"
-            />
-          </div>
-          <div>
-            <label className="block text-sm text-slate-400 mb-2">كلمة المرور الجديدة</label>
-            <input
-              type="password"
-              value={passwordForm.next}
-              onChange={(event) => setPasswordForm((form) => ({ ...form, next: event.target.value }))}
-              autoComplete="new-password"
-              minLength={6}
-              className="w-full bg-slate-900 border border-slate-600 rounded-xl px-4 py-3 text-white placeholder-slate-500 focus:border-blue-500 focus:outline-none transition-colors"
-              placeholder="6 أحرف أو أرقام على الأقل"
-            />
-          </div>
-          <div>
-            <label className="block text-sm text-slate-400 mb-2">تأكيد كلمة المرور الجديدة</label>
-            <input
-              type="password"
-              value={passwordForm.confirm}
-              onChange={(event) => setPasswordForm((form) => ({ ...form, confirm: event.target.value }))}
-              autoComplete="new-password"
-              minLength={6}
-              className="w-full bg-slate-900 border border-slate-600 rounded-xl px-4 py-3 text-white placeholder-slate-500 focus:border-blue-500 focus:outline-none transition-colors"
-              placeholder="أعد كتابة كلمة المرور الجديدة"
-            />
-          </div>
-          <button
-            type="submit"
-            disabled={passwordLoading}
-            className="w-full bg-emerald-600 text-white py-3 rounded-xl font-bold hover:bg-emerald-500 transition-colors disabled:opacity-50"
-          >
-            {passwordLoading ? 'جاري تغيير كلمة المرور...' : 'حفظ كلمة المرور الجديدة'}
-          </button>
-          {passwordError && <p className="text-rose-300 text-xs bg-rose-500/10 border border-rose-500/30 rounded-xl p-3">{passwordError}</p>}
-          {passwordMessage && <p className="text-emerald-300 text-xs bg-emerald-500/10 border border-emerald-500/30 rounded-xl p-3">{passwordMessage}</p>}
-        </form>
 
         <div className="mt-6 border-t border-slate-700/60 pt-5">
           <div className="flex items-start justify-between gap-3 mb-4">

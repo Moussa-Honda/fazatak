@@ -43,7 +43,8 @@ const LicenseGate = ({ onActivated, isModal = false }) => {
       let msg = 'فشل التفعيل: تأكد من الكود وحاول مجدداً';
       const errCode = err.message || '';
       
-      if (errCode.includes('ERR_EXPIRED')) msg = 'عذراً، هذا الكود منتهي الصلاحية';
+      if (errCode.includes('ERR_SERVER_VALIDATION_REQUIRED')) msg = 'تجديد الأكواد متوقف مؤقتًا لحماية الحساب. يرجى التجديد عبر Google Play أو التواصل مع الدعم.';
+      else if (errCode.includes('ERR_EXPIRED')) msg = 'عذراً، هذا الكود منتهي الصلاحية';
       else if (errCode.includes('ERR_WRONG_CODE')) msg = 'هذا الكود غير صالح لهذا الحساب';
       else if (errCode.includes('ERR_WRONG_ACCOUNT') || errCode.includes('ERR_ACCOUNT_NUMBER_REQUIRED')) msg = 'رقم الحساب غير متاح أو غير صحيح';
       else if (errCode.includes('ERR_INVALID_FORMAT')) msg = 'تنسيق الكود غير صحيح (9 أرقام)';
