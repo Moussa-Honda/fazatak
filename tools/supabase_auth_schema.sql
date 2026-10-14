@@ -58,20 +58,30 @@ create table if not exists fazatak_backups (
   created_at timestamp with time zone default timezone('utc'::text, now())
 );
 
--- 4. تفعيل سياسات الأمان (Row Level Security - RLS)
+-- 4. تفعيل RLS مغلق افتراضياً.
+-- لا تُنشئ سياسات anon مفتوحة هنا. استخدم supabase_secure_auth_migration.sql
+-- بعد إعداد Supabase Phone Auth لنشر سياسات الملكية الآمنة.
 alter table fazatak_users enable row level security;
 alter table fazatak_user_data enable row level security;
 alter table fazatak_backups enable row level security;
+alter table fazatak_users force row level security;
+alter table fazatak_user_data force row level security;
+alter table fazatak_backups force row level security;
 
--- السماح بالعمليات عبر مفتاح anon key
-drop policy if exists "Allow all operations for anon on fazatak_users" on fazatak_users;
-create policy "Allow all operations for anon on fazatak_users" on fazatak_users
-  for all using (true) with check (true);
-
-drop policy if exists "Allow all operations for anon on fazatak_user_data" on fazatak_user_data;
-create policy "Allow all operations for anon on fazatak_user_data" on fazatak_user_data
-  for all using (true) with check (true);
-
-drop policy if exists "Allow all operations for anon key" on fazatak_backups;
-create policy "Allow all operations for anon key" on fazatak_backups
-  for all using (true) with check (true);
+do $$
+declare
+  table_name text;
+  policy_name text;
+begin
+  foreach table_name in array array['fazatak_users', 'fazatak_user_data', 'fazatak_backups'] loop
+    for policy_name in
+      select p.policyname
+      from pg_policies p
+      where p.schemaname = 'public' and p.tablename = table_name
+    loop
+      execute format('drop policy %I on public.%I', policy_name, table_name);
+    end loop;
+    execute format('revoke all privileges on table public.%I from public, anon, authenticated', table_name);
+  end loop;
+end
+$$;
