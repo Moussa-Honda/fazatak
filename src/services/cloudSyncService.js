@@ -1,8 +1,8 @@
-import { supabase, isSupabaseConfigured } from './supabase';
 import { exportData, importData, getBusinessRecordsCount } from './backupService';
 import { getDatabase, persistWebStore } from './database';
 import { DATA_CHANGED_EVENT, notifyDataChanged } from './dataEvents';
 import { authService } from './authService';
+import { apiRequest, getSessionToken } from './apiClient';
 
 export const LAST_SYNC_KEY = 'fazatak_last_cloud_sync';
 export const SYNC_STATUS_EVENT = 'fazatak:cloud-sync-status';
@@ -88,7 +88,7 @@ export const cloudSyncService = {
     autoSyncInitialized = true;
 
     // 1. عند حدوث أي عملية (إضافة عميل، عقد، سداد قسط، تعديل، حذف): حفظ ومزامنة فورية (100ms)
-    window.addEventListener(DATA_CHANGED_EVENT, (e) => {
+    window.addEventListener(DATA_CHANGED_EVENT, () => {
       if (isImportingCloud) return;
       this.triggerAutoSync(null, 100);
     });
@@ -128,7 +128,7 @@ export const cloudSyncService = {
             clearTimeout(autoSyncTimeout);
             autoSyncTimeout = null;
           }
-          this.backupUserToCloud(user.account_number, user.phone).catch(err => {
+          this.backupUserToCloud(user.account_number).catch(err => {
             console.warn('[AutoSync] Flush on exit note:', err);
           });
         }
@@ -253,7 +253,7 @@ export const cloudSyncService = {
 
     const user = authService.getCurrentUser();
     const currentAccountNumber = accountNumber || user?.account_number;
-    if (!currentAccountNumber || !isSupabaseConfigured() || !supabase) return;
+    if (!currentAccountNumber || !getSessionToken()) return;
 
     if (autoSyncTimeout) {
       clearTimeout(autoSyncTimeout);
@@ -270,7 +270,7 @@ export const cloudSyncService = {
       notifySyncStatus('syncing');
 
       try {
-        const res = await this.backupUserToCloud(currentAccountNumber, user?.phone);
+        const res = await this.backupUserToCloud(currentAccountNumber);
         if (res.success) {
           notifySyncStatus('synced', {
             lastSync: res.updatedAt || new Date().toISOString(),
@@ -290,11 +290,14 @@ export const cloudSyncService = {
 
   /**
    * رفع وحفظ نسخة كاملة من بيانات ومعاملات العميل الحالية إلى السحابة
-   * مربوطة برقم الحساب الثابت، مع استخدام الهاتف للترحيل القديم فقط
+   * مربوطة برقم الحساب الثابت من خلال جلسة المستخدم الحالية
    */
-  async backupUserToCloud(accountNumber, legacyPhone = null) {
+  async backupUserToCloud(accountNumber) {
     if (!accountNumber) {
       return { success: false, reason: 'no_account_number' };
+    }
+    if (authService.getCurrentUser()?.account_number !== accountNumber || !getSessionToken()) {
+      return { success: false, reason: 'authentication_required' };
     }
 
     try {
@@ -309,57 +312,61 @@ export const cloudSyncService = {
         console.warn('[LocalCache] User cache write warning:', cacheErr);
       }
 
-      if (!isSupabaseConfigured() || !supabase) {
+      if (!getSessionToken()) {
         return { success: true, localOnly: true, recordsCount: totalRecordsCount };
       }
 
       // 🛡️ الدرع الحديدي: منع مسح السحابة نهائياً إذا كانت القاعدة المحلية خالية من المعاملات
-      const existingCloud = await this.getCloudBackup(accountNumber, legacyPhone);
-      const cloudBusinessCount = getBusinessRecordsCount(existingCloud?.backup_payload);
+      let existingCloud = await this.getCloudBackup(accountNumber);
+      let cloudBusinessCount = getBusinessRecordsCount(existingCloud?.backup_payload);
 
-      if (localBusinessCount === 0 && cloudBusinessCount > 0) {
+      if (localBusinessCount === 0 && existingCloud?.backup_payload) {
         console.warn(`🛑 [Shield] تم إيقاف رفع قاعدة فارغة! السحابة تحتوي على ${cloudBusinessCount} معاملة للحساب ${accountNumber}. جاري استرجاع معاملات العميل فوراً!`);
-        await this.restoreUserFromCloud(accountNumber, legacyPhone);
+        await this.restoreUserFromCloud(accountNumber);
         return { success: true, restoredFromCloud: true, recordsCount: existingCloud.records_count };
       }
 
-      const syncTime = new Date().toISOString();
-      const record = {
-        user_account_number: accountNumber,
-        user_phone: legacyPhone || null,
-        backup_payload: payload,
-        records_count: totalRecordsCount,
-        updated_at: syncTime
-      };
+      let uploadPayload = payload;
+      let uploadRecordsCount = totalRecordsCount;
+      const saveBackup = () => apiRequest('sync/data', {
+        method: 'PUT',
+        body: {
+          backupPayload: uploadPayload,
+          recordsCount: uploadRecordsCount,
+          expectedUpdatedAt: existingCloud?.updated_at || null,
+        },
+      });
 
-      const { data, error } = await supabase
-        .from('fazatak_user_data')
-        .upsert(record, { onConflict: 'user_account_number' })
-        .select('id, user_account_number, updated_at, records_count')
-        .single();
+      let result;
+      try {
+        result = await saveBackup();
+      } catch (error) {
+        if (error.code !== 'sync_conflict' || !error.data?.record?.backup_payload) throw error;
+        existingCloud = error.data.record;
+        cloudBusinessCount = getBusinessRecordsCount(existingCloud.backup_payload);
+        if (localBusinessCount === 0 && existingCloud.backup_payload) {
+          await this.restoreUserFromCloud(accountNumber);
+          return { success: true, restoredFromCloud: true, recordsCount: existingCloud.records_count };
+        }
 
-      if (error) {
-        console.warn('[CloudSync] Backup to cloud failed:', error.message);
-        return { success: false, error: error.message };
+        isImportingCloud = true;
+        try {
+          await this.safeMergeCloudData(existingCloud.backup_payload);
+        } finally {
+          isImportingCloud = false;
+        }
+        uploadPayload = await exportData();
+        uploadRecordsCount = Object.values(uploadPayload.counts || {}).reduce((acc, count) => acc + count, 0);
+        result = await saveBackup();
       }
 
-      // حفظ نسخة تاريخية في fazatak_backups إن وجدت معاملات فعلية
-      if (localBusinessCount > 0) {
-        supabase.from('fazatak_backups').insert([{
-          file_name: `أقساطي_CloudSync_${accountNumber}_${Date.now()}.json`,
-          version: '2.0-offline',
-          records_count: totalRecordsCount,
-          tables_count: Object.keys(payload.tables || {}).length,
-          backup_data: payload
-        }]).then(() => {}).catch(() => {});
-      }
-
-      const confirmedTime = data?.updated_at || syncTime;
+      const confirmedTime = result.record?.updated_at || new Date().toISOString();
       localStorage.setItem(LAST_SYNC_KEY, confirmedTime);
       localStorage.removeItem('fazatak_has_pending_cloud_sync');
       localStorage.setItem('fazatak_last_synced_mutation', Date.now().toString());
+      localStorage.setItem(`fazatak_user_cache_${accountNumber}`, JSON.stringify(uploadPayload));
 
-      return { success: true, recordsCount: totalRecordsCount, updatedAt: confirmedTime };
+      return { success: true, recordsCount: uploadRecordsCount, updatedAt: confirmedTime };
     } catch (err) {
       console.error('[CloudSync] Unexpected error during cloud backup:', err);
       return { success: false, error: err.message };
@@ -369,33 +376,13 @@ export const cloudSyncService = {
   /**
    * جلب أحدث نسخة سحابية مسجلة للعميل
    */
-  async getCloudBackup(accountNumber, legacyPhone = null) {
-    if (!accountNumber || !isSupabaseConfigured() || !supabase) return null;
+  async getCloudBackup(accountNumber) {
+    if (!accountNumber || !getSessionToken()) return null;
+    if (authService.getCurrentUser()?.account_number !== accountNumber) return null;
 
     try {
-      let { data, error } = await supabase
-        .from('fazatak_user_data')
-        .select('user_account_number, user_phone, backup_payload, records_count, updated_at')
-        .eq('user_account_number', accountNumber)
-        .maybeSingle();
-
-      // Read old phone-keyed rows once so existing accounts keep their data during migration.
-      if ((!data || error) && legacyPhone) {
-        const legacyResult = await supabase
-          .from('fazatak_user_data')
-          .select('user_account_number, user_phone, backup_payload, records_count, updated_at')
-          .eq('user_phone', legacyPhone)
-          .maybeSingle();
-        data = legacyResult.data;
-        error = legacyResult.error;
-      }
-
-      if (error && !data) {
-        console.warn('[CloudSync] Failed to fetch cloud backup:', error.message);
-        return null;
-      }
-
-      return data;
+      const { record } = await apiRequest('sync/data');
+      return record;
     } catch (err) {
       console.error('[CloudSync] Error fetching cloud data:', err);
       return null;
@@ -412,20 +399,20 @@ export const cloudSyncService = {
       const localPayload = await exportData();
       const localBusinessCount = getBusinessRecordsCount(localPayload);
 
-      const cloudRecord = await this.getCloudBackup(accountNumber, legacyPhone);
+      const cloudRecord = await this.getCloudBackup(accountNumber);
       const cloudBusinessCount = getBusinessRecordsCount(cloudRecord?.backup_payload);
 
       // 🛡️ إذا كان المحلي خالياً من المعاملات والسحابة بها معاملات: استرجاع فوري
-      if (localBusinessCount === 0 && cloudBusinessCount > 0) {
+      if (localBusinessCount === 0 && cloudRecord?.backup_payload) {
         console.log(`[CloudSync] الجهاز خالي من المعاملات والسحابة بها ${cloudBusinessCount} معاملة: استرجاع فوري...`);
         await this.restoreUserFromCloud(accountNumber, legacyPhone);
         return;
       }
 
       // 🛡️ إذا كان المحلي به معاملات والسحابة خالية من المعاملات: رفع فوري لحمايتها
-      if (localBusinessCount > 0 && cloudBusinessCount === 0) {
+      if (localBusinessCount > 0 && !cloudRecord?.backup_payload) {
         console.log(`[CloudSync] الجهاز به ${localBusinessCount} معاملة والسحابة خالية: رفع فوري للسحابة...`);
-        await this.backupUserToCloud(accountNumber, legacyPhone);
+        await this.backupUserToCloud(accountNumber);
         return;
       }
 
@@ -460,8 +447,8 @@ export const cloudSyncService = {
   /**
    * استرجاع وتطبيق بيانات ومعاملات العميل السحابية على المتصفح/الجهاز الحالي بالكامل
    */
-  async restoreUserFromCloud(accountNumber, legacyPhone = null) {
-    const cloudRecord = await this.getCloudBackup(accountNumber, legacyPhone);
+  async restoreUserFromCloud(accountNumber) {
+    const cloudRecord = await this.getCloudBackup(accountNumber);
     if (!cloudRecord || !cloudRecord.backup_payload) {
       return { success: false, message: 'لا توجد بيانات سحابية مسجلة لهذا الحساب حتى الآن' };
     }
@@ -490,7 +477,7 @@ export const cloudSyncService = {
       };
     } catch (err) {
       console.error('[CloudSync] Failed to import cloud data:', err);
-      throw new Error(`فشل استرجاع البيانات السحابية: ${err.message}`);
+      throw new Error(`فشل استرجاع البيانات السحابية: ${err.message}`, { cause: err });
     } finally {
       isImportingCloud = false;
     }
@@ -504,6 +491,8 @@ export const cloudSyncService = {
     if (!accountNumber) return { success: false };
 
     try {
+      if (!getSessionToken()) return { success: true, localOnly: true };
+
       isImportingCloud = true;
 
       const localPayload = await exportData();
@@ -514,18 +503,22 @@ export const cloudSyncService = {
       const legacyLastDbPhone = localStorage.getItem('fazatak_current_db_phone');
       const isUserSwitch = forceIsolated
         || Boolean(lastDbAccountNumber && lastDbAccountNumber !== accountNumber)
-        || Boolean(!lastDbAccountNumber && legacyLastDbPhone && legacyLastDbPhone !== legacyPhone);
+        || Boolean(!lastDbAccountNumber && legacyLastDbPhone && legacyLastDbPhone !== legacyPhone)
+        || Boolean(!lastDbAccountNumber && !legacyLastDbPhone && localBusinessCount > 0);
 
       // 1. جلب بيانات السحابة للحساب الحالي
-      const cloudRecord = await this.getCloudBackup(accountNumber, legacyPhone);
+      const cloudRecord = await this.getCloudBackup(accountNumber);
       const cloudBusinessCount = getBusinessRecordsCount(cloudRecord?.backup_payload);
 
       // لا تسمح لبيانات الحساب السابق بالبقاء عند تبديل الحساب أو إنشاء حساب جديد.
       // نحفظ نسخة محلية للحساب السابق قبل تنظيف قاعدة البيانات حتى لا نفقدها عند العودة إليه.
       if (isUserSwitch) {
         const previousIdentity = lastDbAccountNumber || legacyLastDbPhone;
-        if (previousIdentity && previousIdentity !== accountNumber && previousIdentity !== legacyPhone && localBusinessCount > 0) {
-          localStorage.setItem(`fazatak_user_cache_${previousIdentity}`, JSON.stringify(localPayload));
+        if (localBusinessCount > 0) {
+          const cacheIdentity = previousIdentity && previousIdentity !== accountNumber && previousIdentity !== legacyPhone
+            ? previousIdentity
+            : 'unassigned';
+          localStorage.setItem(`fazatak_user_cache_${cacheIdentity}`, JSON.stringify(localPayload));
         }
 
         if (cloudRecord?.backup_payload) {
@@ -548,8 +541,8 @@ export const cloudSyncService = {
       }
 
       // 2. إذا كانت السحابة تحتوي على معاملات: استرجاعها فوراً وبشكل حاسم
-      if (cloudBusinessCount > 0) {
-        if (localBusinessCount === 0 || cloudBusinessCount >= localBusinessCount) {
+      if (cloudRecord?.backup_payload) {
+        if (localBusinessCount === 0) {
           console.log(`[FullSyncOnLogin] جاري استرجاع ${cloudBusinessCount} معاملة من السحابة للحساب: ${accountNumber}`);
           await importData(await preserveDeviceNotificationSettings(cloudRecord.backup_payload));
           await persistWebStore();
@@ -565,12 +558,20 @@ export const cloudSyncService = {
           notifyDataChanged({ scope: 'all', action: 'login-restore' });
           return { success: true, restored: true, recordsCount: cloudRecord.records_count };
         }
+
+        await this.safeMergeCloudData(cloudRecord.backup_payload);
+        const mergedPayload = await exportData();
+        localStorage.setItem(LAST_SYNC_KEY, cloudRecord.updated_at || new Date().toISOString());
+        localStorage.setItem(`fazatak_user_cache_${accountNumber}`, JSON.stringify(mergedPayload));
+        localStorage.setItem('fazatak_current_db_account_number', accountNumber);
+        notifyDataChanged({ scope: 'all', action: 'login-merge' });
+        return { success: true, merged: true, recordsCount: getBusinessRecordsCount(mergedPayload) };
       }
 
       // 3. إذا كانت السحابة خالية ولكن الجهاز المحلي يحتوي على معاملات لنفس المستخدم: رفعها للسحابة لحمايتها
       if (localBusinessCount > 0 && !isUserSwitch) {
         console.log(`[FullSyncOnLogin] تم العثور على ${localBusinessCount} معاملة محلية والسحابة فارغة: رفع فوري لحمايتها...`);
-        await this.backupUserToCloud(accountNumber, legacyPhone);
+        await this.backupUserToCloud(accountNumber);
         localStorage.setItem('fazatak_current_db_account_number', accountNumber);
         return { success: true, uploaded: true };
       }

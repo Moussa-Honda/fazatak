@@ -139,8 +139,13 @@ self.addEventListener('fetch', (event) => {
   // تجاهل طلبات مختلف الأصول (Supabase, Google, etc.)
   const isExternal = url.origin !== self.location.origin;
   if (isExternal) {
-    // للطلبات الخارجية: شبكة أولاً ثم cache
-    event.respondWith(networkFirstWithCacheFallback(request));
+    // Never persist account/API responses in a shared service-worker cache.
+    event.respondWith(fetch(request));
+    return;
+  }
+
+  if (url.pathname.startsWith('/api/')) {
+    event.respondWith(fetch(request));
     return;
   }
 
@@ -220,7 +225,7 @@ async function cacheFirstWithNetworkFallback(request) {
       cache.put(request, networkResponse.clone());
     }
     return networkResponse;
-  } catch (err) {
+  } catch {
     console.warn('[SW] cacheFirstWithNetworkFallback failed:', request.url);
     return new Response('', { status: 503, statusText: 'Offline' });
   }
@@ -257,19 +262,6 @@ async function networkFirstWithCacheFallback(request) {
     const cached = await caches.match(request);
     return cached || new Response('', { status: 503 });
   }
-}
-
-/**
- * تحديث الـ cache في الخلفية بدون تأخير المستخدم
- */
-function refreshCacheInBackground(request, cacheKey) {
-  fetch(request).then((response) => {
-    if (response && response.status === 200) {
-      caches.open(CACHE_NAME).then((cache) => {
-        cache.put(cacheKey || request, response);
-      });
-    }
-  }).catch(() => {/* offline, skip */});
 }
 
 // ─────────────────────────────────────────────
