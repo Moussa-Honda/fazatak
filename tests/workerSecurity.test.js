@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import worker, {
+  handleBackupArchiveApi,
   getDueCandidate,
   handleAuthApi,
   handlePushApi,
@@ -14,7 +15,7 @@ const makeHash = async (value, phone) => {
   return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, '0')).join('');
 };
 
-const createMock = async () => {
+const createMock = async ({ withBackupKV = false, legacyBackups = [] } = {}) => {
   const phone = '0551234567';
   const account = {
     id: 'account-id',
@@ -28,8 +29,21 @@ const createMock = async () => {
     created_at: '2026-01-01T00:00:00.000Z',
   };
   let cloudRecord = null;
+  const legacyBackupRows = structuredClone(legacyBackups);
   const restRequests = [];
   const rateLimitKeys = [];
+  const backupObjects = new Map();
+  let corruptBackupReads = false;
+  const backupKV = {
+    put: async (key, value) => backupObjects.set(key, new Uint8Array(value)),
+    get: async (key) => {
+      const value = backupObjects.get(key);
+      if (!value) return null;
+      if (corruptBackupReads) return new TextEncoder().encode('{invalid').buffer;
+      return value.buffer.slice(value.byteOffset, value.byteOffset + value.byteLength);
+    },
+    delete: async (key) => backupObjects.delete(key),
+  };
   const originalFetch = globalThis.fetch;
   globalThis.fetch = async (input, init = {}) => {
     const url = new URL(String(input));
@@ -52,7 +66,37 @@ const createMock = async () => {
         cloudRecord = JSON.parse(init.body)[0];
         return new Response(JSON.stringify([cloudRecord]), { status: 201 });
       }
+      if (method === 'PATCH') {
+        const updatedAtFilter = url.searchParams.get('updated_at');
+        if (updatedAtFilter && updatedAtFilter !== `eq.${cloudRecord?.updated_at}`) {
+          return new Response('[]', { status: 200 });
+        }
+        Object.assign(cloudRecord, JSON.parse(init.body));
+        return new Response(JSON.stringify([cloudRecord]), { status: 200 });
+      }
       return new Response(JSON.stringify(cloudRecord ? [cloudRecord] : []), { status: 200 });
+    }
+    if (url.pathname.endsWith('/fazatak_backups')) {
+      if (method === 'PATCH') {
+        const idFilter = url.searchParams.get('id');
+        const row = legacyBackupRows.find((candidate) => idFilter === `eq.${candidate.id}`);
+        const backupFilter = url.searchParams.get('backup_data');
+        const keyFilter = url.searchParams.get('backup_kv_key');
+        const eligible = row
+          && (!backupFilter || (backupFilter === 'not.is.null' ? row.backup_data !== null : row.backup_data === null))
+          && (!keyFilter || (keyFilter === 'is.null' ? row.backup_kv_key == null : keyFilter === `eq.${row.backup_kv_key}`));
+        if (!eligible) return new Response('[]', { status: 200 });
+        Object.assign(row, JSON.parse(init.body));
+        return new Response(JSON.stringify([row]), { status: 200 });
+      }
+      const backupFilter = url.searchParams.get('backup_data');
+      const keyFilter = url.searchParams.get('backup_kv_key');
+      const rows = legacyBackupRows
+        .filter((row) => (!backupFilter || (backupFilter === 'not.is.null' ? row.backup_data !== null : row.backup_data === null))
+          && (!keyFilter || (keyFilter === 'is.null' ? row.backup_kv_key == null : keyFilter === `not.is.null` ? row.backup_kv_key != null : keyFilter === `eq.${row.backup_kv_key}`)))
+        .sort((left, right) => left.id.localeCompare(right.id))
+        .slice(0, Number(url.searchParams.get('limit')) || 100);
+      return new Response(JSON.stringify(rows), { status: 200 });
     }
     return new Response('[]', { status: 200 });
   };
@@ -61,14 +105,21 @@ const createMock = async () => {
     SUPABASE_URL: 'https://project.supabase.co',
     SUPABASE_SERVICE_ROLE_KEY: 'test-service-role-secret',
     AUTH_SESSION_SECRET: 'test-session-secret-with-sufficient-length',
+    BACKUP_ADMIN_SECRET: 'test-legacy-archive-secret-with-sufficient-length',
     AUTH_IP_LIMITER: { limit: async ({ key }) => { rateLimitKeys.push(['ip', key]); return { success: true }; } },
     AUTH_ACCOUNT_LIMITER: { limit: async ({ key }) => { rateLimitKeys.push(['account', key]); return { success: true }; } },
   };
+  if (withBackupKV) env.BACKUP_KV = backupKV;
   return {
     account,
     env,
     restRequests,
     rateLimitKeys,
+    backupObjects,
+    legacyBackupRows,
+    setCorruptBackupReads: (value) => { corruptBackupReads = value; },
+    setCloudRecord: (record) => { cloudRecord = record; },
+    getCloudRecord: () => cloudRecord,
     restore: () => { globalThis.fetch = originalFetch; },
   };
 };
@@ -229,6 +280,91 @@ test('cloud writes reject stale versions rather than overwriting newer data', as
     }, { Authorization: `Bearer ${token}` }), mock.env);
     assert.equal(response.status, 409);
     assert.equal((await response.json()).record.updated_at, current.updated_at);
+  } finally {
+    mock.restore();
+  }
+});
+
+test('legacy backups move to KV only after verification and can be restored', async () => {
+  const backupPayloads = [
+    { version: '2', tables: { customers: [{ id: 1, name: 'Private Customer' }] } },
+    { version: '2', tables: { contracts: [{ id: 2, amount: 987654 }] } },
+  ];
+  const mock = await createMock({
+    withBackupKV: true,
+    legacyBackups: backupPayloads.map((backup_data, index) => ({
+      id: `00000000-0000-0000-0000-00000000000${index + 1}`,
+      backup_data,
+      backup_kv_key: null,
+    })),
+  });
+
+  try {
+    const headers = { Authorization: `Bearer ${mock.env.BACKUP_ADMIN_SECRET}` };
+    const archive = await handleBackupArchiveApi(postJson('https://app.example/api/admin/backup-archive', {
+      action: 'archive',
+      limit: 2,
+    }, headers), mock.env);
+    const archiveResult = await archive.json();
+
+    assert.equal(archive.status, 200);
+    assert.equal(archiveResult.completed, 2);
+    assert.equal(mock.backupObjects.size, 2);
+    for (const row of mock.legacyBackupRows) {
+      assert.equal(row.backup_data, null);
+      assert.match(row.backup_kv_key, /^legacy\/fazatak_backups\/.+\.json\.gz$/);
+    }
+
+    const restore = await handleBackupArchiveApi(postJson('https://app.example/api/admin/backup-archive', {
+      action: 'restore',
+      limit: 2,
+    }, headers), mock.env);
+    const restoreResult = await restore.json();
+
+    assert.equal(restore.status, 200);
+    assert.equal(restoreResult.completed, 2);
+    assert.deepEqual(mock.legacyBackupRows.map((row) => row.backup_data), backupPayloads);
+    assert.ok(mock.legacyBackupRows.every((row) => row.backup_kv_key === null));
+    assert.equal(mock.backupObjects.size, 2);
+  } finally {
+    mock.restore();
+  }
+});
+
+test('legacy archive verification failure preserves the source backup', async () => {
+  const backupPayload = { version: '2', tables: { customers: [{ id: 3 }] } };
+  const mock = await createMock({
+    withBackupKV: true,
+    legacyBackups: [{ id: '00000000-0000-0000-0000-000000000003', backup_data: backupPayload, backup_kv_key: null }],
+  });
+  mock.setCorruptBackupReads(true);
+
+  try {
+    const response = await handleBackupArchiveApi(postJson('https://app.example/api/admin/backup-archive', {
+      action: 'archive',
+      limit: 1,
+    }, { Authorization: `Bearer ${mock.env.BACKUP_ADMIN_SECRET}` }), mock.env);
+    assert.equal(response.status, 503);
+    assert.deepEqual(mock.legacyBackupRows[0].backup_data, backupPayload);
+    assert.equal(mock.legacyBackupRows[0].backup_kv_key, null);
+    assert.equal(mock.backupObjects.size, 0);
+  } finally {
+    mock.restore();
+  }
+});
+
+test('legacy archive endpoint requires its admin secret and KV binding', async () => {
+  const mock = await createMock();
+  try {
+    const unauthorized = await handleBackupArchiveApi(postJson('https://app.example/api/admin/backup-archive', {
+      action: 'archive',
+    }), mock.env);
+    assert.equal(unauthorized.status, 401);
+
+    const noKv = await handleBackupArchiveApi(postJson('https://app.example/api/admin/backup-archive', {
+      action: 'archive',
+    }, { Authorization: `Bearer ${mock.env.BACKUP_ADMIN_SECRET}` }), mock.env);
+    assert.equal(noKv.status, 503);
   } finally {
     mock.restore();
   }
