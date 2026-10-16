@@ -148,13 +148,62 @@ const getAccountByNumber = async (env, accountNumber, columns = PROFILE_COLUMNS)
   return rows?.[0] || null;
 };
 
-const getCloudRecord = async (env, accountNumber) => {
+const getCloudRecordRow = async (env, accountNumber) => {
   const rows = await supabaseRequest(
     env,
     `fazatak_user_data?user_account_number=eq.${encodeURIComponent(accountNumber)}&select=user_account_number,user_phone,backup_payload,records_count,updated_at&limit=1`
   );
   return rows?.[0] || null;
 };
+
+const gzipJson = async (value) => {
+  const stream = new Blob([JSON.stringify(value)]).stream().pipeThrough(new CompressionStream('gzip'));
+  return new Uint8Array(await new Response(stream).arrayBuffer());
+};
+
+const readKvBackup = async (env, key) => {
+  if (!env.BACKUP_KV) throw new Error('Cloud backup KV namespace is not configured');
+  const value = await env.BACKUP_KV.get(key, 'arrayBuffer');
+  if (!value) throw new Error('Archived backup is missing');
+  const stream = new Blob([value]).stream().pipeThrough(new DecompressionStream('gzip'));
+  return new Response(stream).json();
+};
+
+const storeVerifiedKvBackup = async (env, key, payload) => {
+  if (!env.BACKUP_KV) throw new Error('Cloud backup KV namespace is not configured');
+  const compressed = await gzipJson(payload);
+  const value = compressed.buffer.slice(
+    compressed.byteOffset,
+    compressed.byteOffset + compressed.byteLength
+  );
+  await env.BACKUP_KV.put(key, value);
+  try {
+    const verifiedPayload = await readKvBackup(env, key);
+    if (JSON.stringify(verifiedPayload) !== JSON.stringify(payload)) {
+      throw new Error('KV backup verification failed');
+    }
+  } catch (error) {
+    try {
+      await env.BACKUP_KV.delete(key);
+    } catch {
+      // An unreferenced key is safer than clearing the source backup.
+    }
+    throw error;
+  }
+};
+
+const deleteKvBackup = async (env, key) => {
+  if (!key || !env.BACKUP_KV) return;
+  try {
+    await env.BACKUP_KV.delete(key);
+  } catch (error) {
+    console.warn('[BackupArchive] Temporary KV cleanup failed:', error?.name || 'unknown error');
+  }
+};
+
+const getCloudRecord = getCloudRecordRow;
+
+const publicCloudRecord = (record) => record || null;
 
 const publicProfile = (account) => {
   const expired = account.subscription_expiry
@@ -298,7 +347,7 @@ const handleSyncApi = async (request, env) => {
   if (!account) return jsonResponse({ error: 'authentication_required' }, 401);
 
   if (url.pathname === '/api/sync/data' && request.method === 'GET') {
-    return jsonResponse({ record: await getCloudRecord(env, account.account_number) });
+    return jsonResponse({ record: publicCloudRecord(await getCloudRecord(env, account.account_number)) });
   }
 
   if (url.pathname === '/api/sync/data' && request.method === 'PUT') {
@@ -310,7 +359,7 @@ const handleSyncApi = async (request, env) => {
     const existing = await getCloudRecord(env, account.account_number);
     const expectedUpdatedAt = payload.expectedUpdatedAt || null;
     if ((existing?.updated_at || null) !== expectedUpdatedAt) {
-      return jsonResponse({ error: 'sync_conflict', record: existing }, 409);
+      return jsonResponse({ error: 'sync_conflict', record: publicCloudRecord(existing) }, 409);
     }
 
     const updatedAt = new Date().toISOString();
@@ -325,7 +374,10 @@ const handleSyncApi = async (request, env) => {
         updated_at: updatedAt,
       }]),
     });
-    return jsonResponse({ record: rows?.[0] || { ...existing, user_account_number: account.account_number, updated_at: updatedAt } });
+    return jsonResponse({ record: publicCloudRecord({
+      ...(rows?.[0] || { ...existing, user_account_number: account.account_number, updated_at: updatedAt }),
+      backup_payload: payload.backupPayload,
+    }) });
   }
 
   return jsonResponse({ error: 'not_found' }, 404);
@@ -385,6 +437,82 @@ const subscriptionRecord = (payload, ownerPhone) => ({
   last_notification_key: null,
   updated_at: new Date().toISOString(),
 });
+
+const handleBackupArchiveApi = async (request, env) => {
+  if (request.method !== 'POST') return jsonResponse({ error: 'method_not_allowed' }, 405);
+
+  const suppliedSecret = request.headers.get('Authorization')?.match(/^Bearer\s+(.+)$/i)?.[1];
+  if (!env.BACKUP_ADMIN_SECRET || env.BACKUP_ADMIN_SECRET.length < 32
+    || !constantTimeEqual(suppliedSecret, env.BACKUP_ADMIN_SECRET)) {
+    return jsonResponse({ error: 'authentication_required' }, 401);
+  }
+  if (!env.BACKUP_KV) return jsonResponse({ error: 'backup_kv_not_configured' }, 503);
+
+  const payload = await readJson(request, 4096);
+  const action = payload?.action;
+  if (!['archive', 'restore'].includes(action)) return jsonResponse({ error: 'invalid_action' }, 400);
+
+  const requestedLimit = Number(payload.limit);
+  const limit = Number.isFinite(requestedLimit) && requestedLimit > 0
+    ? Math.min(8, Math.floor(requestedLimit))
+    : 8;
+  const isArchive = action === 'archive';
+  const filter = isArchive
+    ? 'backup_data=not.is.null&backup_kv_key=is.null'
+    : 'backup_data=is.null&backup_kv_key=not.is.null';
+
+  let rows;
+  try {
+    rows = await supabaseRequest(
+      env,
+      `fazatak_backups?select=id,backup_data,backup_kv_key&${filter}&order=id.asc&limit=${limit}`
+    );
+  } catch (error) {
+    console.warn('[BackupArchive] Batch query failed:', error?.name || 'unknown error');
+    return jsonResponse({ error: 'archive_unavailable' }, 503);
+  }
+
+  let completed = 0;
+  for (const row of rows || []) {
+    const key = row.backup_kv_key || `legacy/fazatak_backups/${encodeURIComponent(row.id)}.json.gz`;
+    try {
+      if (isArchive) {
+        await storeVerifiedKvBackup(env, key, row.backup_data);
+        const updated = await supabaseRequest(
+          env,
+          `fazatak_backups?id=eq.${encodeURIComponent(row.id)}&backup_data=not.is.null&backup_kv_key=is.null&select=id`,
+          {
+            method: 'PATCH',
+            headers: { Prefer: 'return=representation' },
+            body: JSON.stringify({ backup_data: null, backup_kv_key: key }),
+          }
+        );
+        if (!updated?.length) {
+          await deleteKvBackup(env, key);
+          continue;
+        }
+      } else {
+        const backupData = await readKvBackup(env, row.backup_kv_key);
+        const updated = await supabaseRequest(
+          env,
+          `fazatak_backups?id=eq.${encodeURIComponent(row.id)}&backup_data=is.null&backup_kv_key=eq.${encodeURIComponent(row.backup_kv_key)}&select=id`,
+          {
+            method: 'PATCH',
+            headers: { Prefer: 'return=representation' },
+            body: JSON.stringify({ backup_data: backupData, backup_kv_key: null }),
+          }
+        );
+        if (!updated?.length) continue;
+      }
+      completed += 1;
+    } catch (error) {
+      console.warn('[BackupArchive] Batch stopped safely:', error?.name || 'unknown error');
+      return jsonResponse({ error: 'archive_failed', completed }, 503);
+    }
+  }
+
+  return jsonResponse({ action, scanned: rows?.length || 0, completed, hasMore: rows?.length === limit });
+};
 
 const handlePushApi = async (request, env) => {
   const url = new URL(request.url);
@@ -744,11 +872,8 @@ const runScheduledNotifications = async (env) => {
       if (!record.user_phone || !isAllowedPushEndpoint(record.endpoint)) continue;
       const account = await getAccountByPhone(env, record.user_phone, 'account_number');
       if (!account?.account_number) continue;
-      const rows = await supabaseRequest(
-        env,
-        `fazatak_user_data?user_account_number=eq.${encodeURIComponent(account.account_number)}&select=backup_payload&limit=1`
-      );
-      const candidate = getDueCandidate(rows?.[0]?.backup_payload, new Date(), record.timezone);
+      const cloudRecord = await getCloudRecord(env, account.account_number);
+      const candidate = getDueCandidate(cloudRecord?.backup_payload, new Date(), record.timezone);
       if (!candidate || candidate.key === record.last_notification_key) continue;
 
       const result = await sendWebPush(env, record.subscription, candidate);
@@ -796,7 +921,8 @@ export default {
       if (request.method === 'OPTIONS') return withCors(new Response(null, { status: 204 }), request);
       try {
         let response;
-        if (url.pathname.startsWith('/api/push/')) response = await handlePushApi(request, env);
+        if (url.pathname === '/api/admin/backup-archive') response = await handleBackupArchiveApi(request, env);
+        else if (url.pathname.startsWith('/api/push/')) response = await handlePushApi(request, env);
         else if (url.pathname.startsWith('/api/auth/')) response = await handleAuthApi(request, env);
         else if (url.pathname.startsWith('/api/sync/')) response = await handleSyncApi(request, env);
         else response = jsonResponse({ error: 'not_found' }, 404);
@@ -816,6 +942,7 @@ export default {
 
 export {
   handleAuthApi,
+  handleBackupArchiveApi,
   handlePushApi,
   handleSyncApi,
   runScheduledNotifications,
