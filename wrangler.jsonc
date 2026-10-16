@@ -6,6 +6,12 @@
   "vars": {
     "SUPABASE_URL": "https://ehufhgulrubgnntmdhxn.supabase.co"
   },
+  "kv_namespaces": [
+    {
+      "binding": "BACKUP_KV",
+      "id": "17e10e467cea46b09fdce2b84d63e34d"
+    }
+  ],
   "ratelimits": [
     {
       "name": "AUTH_ACCOUNT_LIMITER",
