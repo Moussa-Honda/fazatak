@@ -16,7 +16,7 @@ Cloudflare documents 1 GB of KV storage, 1,000 writes per day, and 100,000 reads
 ## Safety
 
 - The Worker verifies the exact stored JSON before it clears a source row. Verification failure leaves the JSONB payload in Supabase.
-- New archives use raw JSON to stay within the free Worker CPU limit; restore remains compatible with existing compressed KV objects.
+- New archives keep large backup payloads as raw JSON and avoid parsing them in the Worker, staying within the free CPU limit; restore remains compatible with existing compressed KV objects.
 - The archive endpoint requires a separate Worker secret and processes at most two rows per KV value per request.
 - Uncertain database responses leave the KV key in place; an orphan copy is safer than deleting a possible live copy.
 - `fazatak_backups` is not used by the current app code. This archives its historical records; active account sync stays in Supabase.
