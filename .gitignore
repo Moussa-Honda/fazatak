@@ -76,3 +76,13 @@ tools/*.pem
 *.key
 *.pem
 *.p8
+
+# Customer data and database backups (never commit these to source control)
+backups/
+*.sqlite
+*.sqlite3
+*.db
+*.dump
+*.backup
+*.sql.gz
+*.jsonl.gz

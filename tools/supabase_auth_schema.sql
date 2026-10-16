@@ -55,6 +55,7 @@ create table if not exists fazatak_backups (
   records_count integer,
   tables_count integer,
   backup_data jsonb,
+  backup_kv_key text,
   created_at timestamp with time zone default timezone('utc'::text, now())
 );
 
@@ -63,15 +64,8 @@ alter table fazatak_users enable row level security;
 alter table fazatak_user_data enable row level security;
 alter table fazatak_backups enable row level security;
 
--- السماح بالعمليات عبر مفتاح anon key
+-- These tables are accessed through the authenticated Worker, not directly by browser clients.
 drop policy if exists "Allow all operations for anon on fazatak_users" on fazatak_users;
-create policy "Allow all operations for anon on fazatak_users" on fazatak_users
-  for all using (true) with check (true);
-
 drop policy if exists "Allow all operations for anon on fazatak_user_data" on fazatak_user_data;
-create policy "Allow all operations for anon on fazatak_user_data" on fazatak_user_data
-  for all using (true) with check (true);
-
 drop policy if exists "Allow all operations for anon key" on fazatak_backups;
-create policy "Allow all operations for anon key" on fazatak_backups
-  for all using (true) with check (true);
+revoke all on table public.fazatak_users, public.fazatak_user_data, public.fazatak_backups from anon, authenticated;
