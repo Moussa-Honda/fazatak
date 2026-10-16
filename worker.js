@@ -32,6 +32,86 @@ const supabaseRequest = async (env, path, init = {}) => {
   return body ? JSON.parse(body) : null;
 };
 
+const supabaseRequestText = async (env, path) => {
+  const { url, key } = getSupabaseConfig(env);
+  const headers = new Headers({ apikey: key, Authorization: `Bearer ${key}` });
+  const response = await fetch(`${url}/rest/v1/${path}`, { headers });
+  if (!response.ok) throw new Error(`Supabase ${response.status}: ${await response.text()}`);
+  return response.text();
+};
+
+const skipJsonWhitespace = (text, index) => {
+  while (text[index] === ' ' || text[index] === '\n' || text[index] === '\r' || text[index] === '\t') index += 1;
+  return index;
+};
+
+const jsonValueEnd = (text, start) => {
+  const first = text[start];
+  if (first === '"') {
+    let escaped = false;
+    for (let index = start + 1; index < text.length; index += 1) {
+      if (escaped) escaped = false;
+      else if (text[index] === '\\') escaped = true;
+      else if (text[index] === '"') return index + 1;
+    }
+    return -1;
+  }
+
+  if (first === '{' || first === '[') {
+    let depth = 0;
+    let inString = false;
+    let escaped = false;
+    for (let index = start; index < text.length; index += 1) {
+      const char = text[index];
+      if (inString) {
+        if (escaped) escaped = false;
+        else if (char === '\\') escaped = true;
+        else if (char === '"') inString = false;
+      } else if (char === '"') inString = true;
+      else if (char === '{' || char === '[') depth += 1;
+      else if (char === '}' || char === ']') {
+        depth -= 1;
+        if (!depth) return index + 1;
+      }
+    }
+    return -1;
+  }
+
+  let index = start;
+  while (index < text.length && text[index] !== ',' && text[index] !== ']' && text[index] !== '}') index += 1;
+  return index;
+};
+
+const parseBackupRows = (text) => {
+  const start = skipJsonWhitespace(text, 0);
+  let end = text.length - 1;
+  while (end >= start && (text[end] === ' ' || text[end] === '\n' || text[end] === '\r' || text[end] === '\t')) end -= 1;
+  if (text[start] !== '[' || text[end] !== ']') throw new Error('Supabase backup response is malformed');
+  const firstItem = skipJsonWhitespace(text, start + 1);
+  if (firstItem >= end) return [];
+
+  const rows = [];
+  let cursor = firstItem;
+  while (cursor < end) {
+    const idKey = text.indexOf('"id"', cursor);
+    if (idKey < 0 || idKey >= end) break;
+    const idStart = skipJsonWhitespace(text, text.indexOf(':', idKey + 4) + 1);
+    const idEnd = jsonValueEnd(text, idStart);
+    const dataKey = text.indexOf('"backup_data"', idEnd);
+    if (idEnd < 0 || dataKey < 0 || dataKey >= end) throw new Error('Supabase backup row is malformed');
+    const dataStart = skipJsonWhitespace(text, text.indexOf(':', dataKey + 13) + 1);
+    const dataEnd = jsonValueEnd(text, dataStart);
+    if (dataEnd < 0 || dataEnd > end) throw new Error('Supabase backup payload is malformed');
+
+    const id = JSON.parse(text.slice(idStart, idEnd));
+    if (typeof id !== 'string') throw new Error('Supabase backup ID is malformed');
+    rows.push({ id, backupDataJson: text.slice(dataStart, dataEnd) });
+    cursor = dataEnd;
+  }
+  if (!rows.length) throw new Error('Supabase backup response has no rows');
+  return rows;
+};
+
 const base64UrlEncode = (bytes) => {
   let binary = '';
   for (const byte of bytes) binary += String.fromCharCode(byte);
@@ -181,8 +261,9 @@ const readKvBackup = async (env, pointer) => {
 
 const storeVerifiedKvBackupBatch = async (env, key, items) => {
   if (!env.BACKUP_KV) throw new Error('Cloud backup KV namespace is not configured');
-  const payload = { version: 1, items };
-  const serialized = JSON.stringify(payload);
+  const serialized = `{"version":1,"items":[${items.map((item) => (
+    `{"id":${JSON.stringify(item.id)},"data":${item.backupDataJson}}`
+  )).join(',')}]}`;
   if (new Blob([serialized]).size > 25 * 1024 * 1024) throw new Error('KV backup batch exceeds the value size limit');
   await env.BACKUP_KV.put(key, serialized);
   try {
@@ -462,10 +543,10 @@ const handleBackupArchiveApi = async (request, env) => {
 
   let rows;
   try {
-    rows = await supabaseRequest(
-      env,
-      `fazatak_backups?select=id,backup_data,backup_kv_key&${filter}&order=id.asc&limit=${limit}`
-    );
+    const path = `fazatak_backups?select=${isArchive ? 'id,backup_data' : 'id,backup_data,backup_kv_key'}&${filter}&order=id.asc&limit=${limit}`;
+    rows = isArchive
+      ? parseBackupRows(await supabaseRequestText(env, path))
+      : await supabaseRequest(env, path);
   } catch (error) {
     console.warn('[BackupArchive] Batch query failed:', error?.name || 'unknown error');
     return jsonResponse({ error: 'archive_unavailable' }, 503);
@@ -474,7 +555,7 @@ const handleBackupArchiveApi = async (request, env) => {
   let completed = 0;
   if (isArchive && rows?.length) {
     const key = `legacy/fazatak_backups/batch-${crypto.randomUUID()}.json`;
-    const items = rows.map((row) => ({ id: String(row.id), data: row.backup_data }));
+    const items = rows.map((row) => ({ id: row.id, backupDataJson: row.backupDataJson }));
     try {
       await storeVerifiedKvBackupBatch(env, key, items);
       for (const row of rows) {
