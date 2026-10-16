@@ -156,17 +156,16 @@ const getCloudRecordRow = async (env, accountNumber) => {
   return rows?.[0] || null;
 };
 
-const gzipJson = async (value) => {
-  const stream = new Blob([JSON.stringify(value)]).stream().pipeThrough(new CompressionStream('gzip'));
-  return new Uint8Array(await new Response(stream).arrayBuffer());
-};
-
 const readKvJson = async (env, key) => {
   if (!env.BACKUP_KV) throw new Error('Cloud backup KV namespace is not configured');
   const value = await env.BACKUP_KV.get(key, 'arrayBuffer');
   if (!value) throw new Error('Archived backup is missing');
-  const stream = new Blob([value]).stream().pipeThrough(new DecompressionStream('gzip'));
-  return new Response(stream).json();
+  const bytes = new Uint8Array(value);
+  if (bytes[0] === 0x1f && bytes[1] === 0x8b) {
+    const stream = new Blob([bytes]).stream().pipeThrough(new DecompressionStream('gzip'));
+    return new Response(stream).json();
+  }
+  return JSON.parse(new TextDecoder().decode(bytes));
 };
 
 const readKvBackup = async (env, pointer) => {
@@ -183,16 +182,12 @@ const readKvBackup = async (env, pointer) => {
 const storeVerifiedKvBackupBatch = async (env, key, items) => {
   if (!env.BACKUP_KV) throw new Error('Cloud backup KV namespace is not configured');
   const payload = { version: 1, items };
-  const compressed = await gzipJson(payload);
-  if (compressed.byteLength > 25 * 1024 * 1024) throw new Error('KV backup batch exceeds the value size limit');
-  const value = compressed.buffer.slice(
-    compressed.byteOffset,
-    compressed.byteOffset + compressed.byteLength
-  );
-  await env.BACKUP_KV.put(key, value);
+  const serialized = JSON.stringify(payload);
+  if (new Blob([serialized]).size > 25 * 1024 * 1024) throw new Error('KV backup batch exceeds the value size limit');
+  await env.BACKUP_KV.put(key, serialized);
   try {
-    const verifiedPayload = await readKvJson(env, key);
-    if (JSON.stringify(verifiedPayload) !== JSON.stringify(payload)) {
+    const verifiedValue = await env.BACKUP_KV.get(key, 'text');
+    if (verifiedValue !== serialized) {
       throw new Error('KV backup verification failed');
     }
   } catch (error) {
@@ -458,8 +453,8 @@ const handleBackupArchiveApi = async (request, env) => {
 
   const requestedLimit = Number(payload.limit);
   const limit = Number.isFinite(requestedLimit) && requestedLimit > 0
-    ? Math.min(8, Math.floor(requestedLimit))
-    : 8;
+    ? Math.min(2, Math.floor(requestedLimit))
+    : 2;
   const isArchive = action === 'archive';
   const filter = isArchive
     ? 'backup_data=not.is.null&backup_kv_key=is.null'
@@ -478,7 +473,7 @@ const handleBackupArchiveApi = async (request, env) => {
 
   let completed = 0;
   if (isArchive && rows?.length) {
-    const key = `legacy/fazatak_backups/batch-${crypto.randomUUID()}.json.gz`;
+    const key = `legacy/fazatak_backups/batch-${crypto.randomUUID()}.json`;
     const items = rows.map((row) => ({ id: String(row.id), data: row.backup_data }));
     try {
       await storeVerifiedKvBackupBatch(env, key, items);
