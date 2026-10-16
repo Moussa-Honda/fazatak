@@ -289,7 +289,7 @@ test('cloud writes reject stale versions rather than overwriting newer data', as
   }
 });
 
-test('legacy backups move to KV only after verification and can be restored', async () => {
+test('legacy backups move to KV only after verification and restore with their pointer intact', async () => {
   const backupPayloads = [
     { version: '2', tables: { customers: [{ id: 1, name: 'Private Customer', note: 'brace } and quote " safely' }] } },
     { version: '2', tables: { contracts: [{ id: 2, amount: 987654 }] } },
@@ -320,6 +320,7 @@ test('legacy backups move to KV only after verification and can be restored', as
       assert.match(row.backup_kv_key, /^legacy\/fazatak_backups\/batch-[0-9a-f-]+\.json#/);
       assert.ok(row.backup_kv_key.endsWith(`#${encodeURIComponent(row.id)}`));
     }
+    const archivedPointers = mock.legacyBackupRows.map((row) => row.backup_kv_key);
 
     const restore = await handleBackupArchiveApi(postJson('https://app.example/api/admin/backup-archive', {
       action: 'restore',
@@ -330,8 +331,14 @@ test('legacy backups move to KV only after verification and can be restored', as
     assert.equal(restore.status, 200);
     assert.equal(restoreResult.completed, 2);
     assert.deepEqual(mock.legacyBackupRows.map((row) => row.backup_data), backupPayloads);
-    assert.ok(mock.legacyBackupRows.every((row) => row.backup_kv_key === null));
+    assert.deepEqual(mock.legacyBackupRows.map((row) => row.backup_kv_key), archivedPointers);
     assert.equal(mock.backupObjects.size, 1);
+
+    const scheduledTasks = [];
+    await worker.scheduled({}, mock.env, { waitUntil: (task) => scheduledTasks.push(task) });
+    await Promise.all(scheduledTasks);
+    assert.deepEqual(mock.legacyBackupRows.map((row) => row.backup_data), backupPayloads);
+    assert.deepEqual(mock.legacyBackupRows.map((row) => row.backup_kv_key), archivedPointers);
   } finally {
     mock.restore();
   }
@@ -386,7 +393,7 @@ test('legacy gzip KV backups remain restorable after raw JSON archives are intro
     assert.equal(response.status, 200);
     assert.equal((await response.json()).completed, 1);
     assert.deepEqual(mock.legacyBackupRows[0].backup_data, backupPayload);
-    assert.equal(mock.legacyBackupRows[0].backup_kv_key, null);
+    assert.equal(mock.legacyBackupRows[0].backup_kv_key, `${key}#${id}`);
   } finally {
     mock.restore();
   }
@@ -450,6 +457,55 @@ test('scheduled push fails closed without a service-role secret', async () => {
     runScheduledNotifications({ VAPID_PUBLIC_KEY: 'public', VAPID_PRIVATE_KEY: 'private' }),
     /Worker secrets are not configured/
   );
+});
+
+test('scheduled task archives at most two historical rows without touching active sync data', async () => {
+  const legacyBackups = [1, 2, 3].map((id) => ({
+    id: `00000000-0000-0000-0000-${String(id).padStart(12, '0')}`,
+    backup_data: { version: '2', tables: { customers: [{ id }] } },
+    backup_kv_key: null,
+  }));
+  const mock = await createMock({ withBackupKV: true, legacyBackups });
+  delete mock.env.BACKUP_ADMIN_SECRET;
+  const scheduledTasks = [];
+
+  try {
+    await worker.scheduled({}, mock.env, { waitUntil: (task) => scheduledTasks.push(task) });
+    await Promise.all(scheduledTasks);
+
+    assert.equal(mock.legacyBackupRows.filter((row) => row.backup_kv_key).length, 2);
+    assert.equal(mock.legacyBackupRows.filter((row) => row.backup_data !== null).length, 1);
+    assert.equal(mock.backupObjects.size, 1);
+    assert.equal(mock.restRequests.some(({ url }) => new URL(url).pathname.endsWith('/fazatak_user_data')), false);
+  } finally {
+    mock.restore();
+  }
+});
+
+test('scheduled archive leaves historical rows untouched when KV is not configured', async () => {
+  const backupPayload = { version: '2', tables: { customers: [{ id: 7 }] } };
+  const mock = await createMock({
+    legacyBackups: [{
+      id: '00000000-0000-0000-0000-000000000007',
+      backup_data: backupPayload,
+      backup_kv_key: null,
+    }],
+  });
+  const scheduledTasks = [];
+
+  try {
+    await worker.scheduled({}, mock.env, { waitUntil: (task) => scheduledTasks.push(task) });
+    await Promise.all(scheduledTasks);
+
+    assert.deepEqual(mock.legacyBackupRows[0], {
+      id: '00000000-0000-0000-0000-000000000007',
+      backup_data: backupPayload,
+      backup_kv_key: null,
+    });
+    assert.equal(mock.restRequests.some(({ url }) => new URL(url).pathname.endsWith('/fazatak_backups')), false);
+  } finally {
+    mock.restore();
+  }
 });
 
 test('due reminders do not reveal customer names or amounts', () => {
