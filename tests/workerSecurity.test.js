@@ -309,10 +309,12 @@ test('legacy backups move to KV only after verification and can be restored', as
 
     assert.equal(archive.status, 200);
     assert.equal(archiveResult.completed, 2);
-    assert.equal(mock.backupObjects.size, 2);
+    assert.equal(mock.backupObjects.size, 1);
+    assert.equal(new Set(mock.legacyBackupRows.map((row) => row.backup_kv_key.split('#')[0])).size, 1);
     for (const row of mock.legacyBackupRows) {
       assert.equal(row.backup_data, null);
-      assert.match(row.backup_kv_key, /^legacy\/fazatak_backups\/.+\.json\.gz$/);
+      assert.match(row.backup_kv_key, /^legacy\/fazatak_backups\/batch-[0-9a-f-]+\.json\.gz#/);
+      assert.ok(row.backup_kv_key.endsWith(`#${encodeURIComponent(row.id)}`));
     }
 
     const restore = await handleBackupArchiveApi(postJson('https://app.example/api/admin/backup-archive', {
@@ -325,7 +327,7 @@ test('legacy backups move to KV only after verification and can be restored', as
     assert.equal(restoreResult.completed, 2);
     assert.deepEqual(mock.legacyBackupRows.map((row) => row.backup_data), backupPayloads);
     assert.ok(mock.legacyBackupRows.every((row) => row.backup_kv_key === null));
-    assert.equal(mock.backupObjects.size, 2);
+    assert.equal(mock.backupObjects.size, 1);
   } finally {
     mock.restore();
   }

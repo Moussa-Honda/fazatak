@@ -161,7 +161,7 @@ const gzipJson = async (value) => {
   return new Uint8Array(await new Response(stream).arrayBuffer());
 };
 
-const readKvBackup = async (env, key) => {
+const readKvJson = async (env, key) => {
   if (!env.BACKUP_KV) throw new Error('Cloud backup KV namespace is not configured');
   const value = await env.BACKUP_KV.get(key, 'arrayBuffer');
   if (!value) throw new Error('Archived backup is missing');
@@ -169,16 +169,29 @@ const readKvBackup = async (env, key) => {
   return new Response(stream).json();
 };
 
-const storeVerifiedKvBackup = async (env, key, payload) => {
+const readKvBackup = async (env, pointer) => {
+  const separator = pointer.lastIndexOf('#');
+  if (separator < 0) throw new Error('Archived backup pointer is invalid');
+  const key = pointer.slice(0, separator);
+  const id = decodeURIComponent(pointer.slice(separator + 1));
+  const batch = await readKvJson(env, key);
+  const item = batch?.items?.find((candidate) => String(candidate.id) === id);
+  if (!item) throw new Error('Archived backup record is missing');
+  return item.data;
+};
+
+const storeVerifiedKvBackupBatch = async (env, key, items) => {
   if (!env.BACKUP_KV) throw new Error('Cloud backup KV namespace is not configured');
+  const payload = { version: 1, items };
   const compressed = await gzipJson(payload);
+  if (compressed.byteLength > 25 * 1024 * 1024) throw new Error('KV backup batch exceeds the value size limit');
   const value = compressed.buffer.slice(
     compressed.byteOffset,
     compressed.byteOffset + compressed.byteLength
   );
   await env.BACKUP_KV.put(key, value);
   try {
-    const verifiedPayload = await readKvBackup(env, key);
+    const verifiedPayload = await readKvJson(env, key);
     if (JSON.stringify(verifiedPayload) !== JSON.stringify(payload)) {
       throw new Error('KV backup verification failed');
     }
@@ -189,15 +202,6 @@ const storeVerifiedKvBackup = async (env, key, payload) => {
       // An unreferenced key is safer than clearing the source backup.
     }
     throw error;
-  }
-};
-
-const deleteKvBackup = async (env, key) => {
-  if (!key || !env.BACKUP_KV) return;
-  try {
-    await env.BACKUP_KV.delete(key);
-  } catch (error) {
-    console.warn('[BackupArchive] Temporary KV cleanup failed:', error?.name || 'unknown error');
   }
 };
 
@@ -473,25 +477,32 @@ const handleBackupArchiveApi = async (request, env) => {
   }
 
   let completed = 0;
-  for (const row of rows || []) {
-    const key = row.backup_kv_key || `legacy/fazatak_backups/${encodeURIComponent(row.id)}.json.gz`;
+  if (isArchive && rows?.length) {
+    const key = `legacy/fazatak_backups/batch-${crypto.randomUUID()}.json.gz`;
+    const items = rows.map((row) => ({ id: String(row.id), data: row.backup_data }));
     try {
-      if (isArchive) {
-        await storeVerifiedKvBackup(env, key, row.backup_data);
+      await storeVerifiedKvBackupBatch(env, key, items);
+      for (const row of rows) {
+        const pointer = `${key}#${encodeURIComponent(row.id)}`;
         const updated = await supabaseRequest(
           env,
           `fazatak_backups?id=eq.${encodeURIComponent(row.id)}&backup_data=not.is.null&backup_kv_key=is.null&select=id`,
           {
             method: 'PATCH',
             headers: { Prefer: 'return=representation' },
-            body: JSON.stringify({ backup_data: null, backup_kv_key: key }),
+            body: JSON.stringify({ backup_data: null, backup_kv_key: pointer }),
           }
         );
-        if (!updated?.length) {
-          await deleteKvBackup(env, key);
-          continue;
-        }
-      } else {
+        if (updated?.length) completed += 1;
+      }
+      if (!completed) await env.BACKUP_KV.delete(key).catch(() => {});
+    } catch (error) {
+      console.warn('[BackupArchive] Batch stopped safely:', error?.name || 'unknown error');
+      return jsonResponse({ error: 'archive_failed', completed }, 503);
+    }
+  } else if (!isArchive) {
+    for (const row of rows || []) {
+      try {
         const backupData = await readKvBackup(env, row.backup_kv_key);
         const updated = await supabaseRequest(
           env,
@@ -503,11 +514,11 @@ const handleBackupArchiveApi = async (request, env) => {
           }
         );
         if (!updated?.length) continue;
+        completed += 1;
+      } catch (error) {
+        console.warn('[BackupArchive] Batch stopped safely:', error?.name || 'unknown error');
+        return jsonResponse({ error: 'archive_failed', completed }, 503);
       }
-      completed += 1;
-    } catch (error) {
-      console.warn('[BackupArchive] Batch stopped safely:', error?.name || 'unknown error');
-      return jsonResponse({ error: 'archive_failed', completed }, 503);
     }
   }
 
