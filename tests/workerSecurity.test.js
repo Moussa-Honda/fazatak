@@ -291,7 +291,7 @@ test('cloud writes reject stale versions rather than overwriting newer data', as
 
 test('legacy backups move to KV only after verification and can be restored', async () => {
   const backupPayloads = [
-    { version: '2', tables: { customers: [{ id: 1, name: 'Private Customer' }] } },
+    { version: '2', tables: { customers: [{ id: 1, name: 'Private Customer', note: 'brace } and quote " safely' }] } },
     { version: '2', tables: { contracts: [{ id: 2, amount: 987654 }] } },
   ];
   const mock = await createMock({
@@ -332,6 +332,32 @@ test('legacy backups move to KV only after verification and can be restored', as
     assert.deepEqual(mock.legacyBackupRows.map((row) => row.backup_data), backupPayloads);
     assert.ok(mock.legacyBackupRows.every((row) => row.backup_kv_key === null));
     assert.equal(mock.backupObjects.size, 1);
+  } finally {
+    mock.restore();
+  }
+});
+
+test('large backup payloads are archived from raw Supabase JSON without re-parsing the payload', async () => {
+  const backupPayload = { version: '2', tables: { customers: [{ id: 10, notes: 'x'.repeat(2_700_000) }] } };
+  const mock = await createMock({
+    withBackupKV: true,
+    legacyBackups: [{ id: '00000000-0000-0000-0000-000000000010', backup_data: backupPayload, backup_kv_key: null }],
+  });
+
+  try {
+    const response = await handleBackupArchiveApi(postJson('https://app.example/api/admin/backup-archive', {
+      action: 'archive',
+      limit: 1,
+    }, { Authorization: `Bearer ${mock.env.BACKUP_ADMIN_SECRET}` }), mock.env);
+    const result = await response.json();
+    const pointer = mock.legacyBackupRows[0].backup_kv_key;
+    const key = pointer.split('#')[0];
+    const stored = JSON.parse(new TextDecoder().decode(mock.backupObjects.get(key)));
+
+    assert.equal(response.status, 200);
+    assert.equal(result.completed, 1);
+    assert.deepEqual(stored.items[0].data, backupPayload);
+    assert.equal(mock.legacyBackupRows[0].backup_data, null);
   } finally {
     mock.restore();
   }
