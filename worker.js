@@ -518,42 +518,20 @@ const subscriptionRecord = (payload, ownerPhone) => ({
   updated_at: new Date().toISOString(),
 });
 
-const handleBackupArchiveApi = async (request, env) => {
-  if (request.method !== 'POST') return jsonResponse({ error: 'method_not_allowed' }, 405);
-
-  const suppliedSecret = request.headers.get('Authorization')?.match(/^Bearer\s+(.+)$/i)?.[1];
-  if (!env.BACKUP_ADMIN_SECRET || env.BACKUP_ADMIN_SECRET.length < 32
-    || !constantTimeEqual(suppliedSecret, env.BACKUP_ADMIN_SECRET)) {
-    return jsonResponse({ error: 'authentication_required' }, 401);
-  }
-  if (!env.BACKUP_KV) return jsonResponse({ error: 'backup_kv_not_configured' }, 503);
-
-  const payload = await readJson(request, 4096);
-  const action = payload?.action;
-  if (!['archive', 'restore'].includes(action)) return jsonResponse({ error: 'invalid_action' }, 400);
-
-  const requestedLimit = Number(payload.limit);
-  const limit = Number.isFinite(requestedLimit) && requestedLimit > 0
-    ? Math.min(2, Math.floor(requestedLimit))
-    : 2;
-  const isArchive = action === 'archive';
-  const filter = isArchive
-    ? 'backup_data=not.is.null&backup_kv_key=is.null'
-    : 'backup_data=is.null&backup_kv_key=not.is.null';
+const archiveBackupBatch = async (env, limit = 2) => {
+  if (!env.BACKUP_KV) return { status: 503, body: { error: 'backup_kv_not_configured' } };
 
   let rows;
   try {
-    const path = `fazatak_backups?select=${isArchive ? 'id,backup_data' : 'id,backup_data,backup_kv_key'}&${filter}&order=id.asc&limit=${limit}`;
-    rows = isArchive
-      ? parseBackupRows(await supabaseRequestText(env, path))
-      : await supabaseRequest(env, path);
+    const path = `fazatak_backups?select=id,backup_data&backup_data=not.is.null&backup_kv_key=is.null&order=id.asc&limit=${limit}`;
+    rows = parseBackupRows(await supabaseRequestText(env, path));
   } catch (error) {
     console.warn('[BackupArchive] Batch query failed:', error?.name || 'unknown error');
-    return jsonResponse({ error: 'archive_unavailable' }, 503);
+    return { status: 503, body: { error: 'archive_unavailable' } };
   }
 
   let completed = 0;
-  if (isArchive && rows?.length) {
+  if (rows.length) {
     const key = `legacy/fazatak_backups/batch-${crypto.randomUUID()}.json`;
     const items = rows.map((row) => ({ id: row.id, backupDataJson: row.backupDataJson }));
     try {
@@ -574,27 +552,69 @@ const handleBackupArchiveApi = async (request, env) => {
       if (!completed) await env.BACKUP_KV.delete(key).catch(() => {});
     } catch (error) {
       console.warn('[BackupArchive] Batch stopped safely:', error?.name || 'unknown error');
-      return jsonResponse({ error: 'archive_failed', completed }, 503);
+      return { status: 503, body: { error: 'archive_failed', completed } };
     }
-  } else if (!isArchive) {
-    for (const row of rows || []) {
-      try {
-        const backupData = await readKvBackup(env, row.backup_kv_key);
-        const updated = await supabaseRequest(
-          env,
-          `fazatak_backups?id=eq.${encodeURIComponent(row.id)}&backup_data=is.null&backup_kv_key=eq.${encodeURIComponent(row.backup_kv_key)}&select=id`,
-          {
-            method: 'PATCH',
-            headers: { Prefer: 'return=representation' },
-            body: JSON.stringify({ backup_data: backupData, backup_kv_key: null }),
-          }
-        );
-        if (!updated?.length) continue;
-        completed += 1;
-      } catch (error) {
-        console.warn('[BackupArchive] Batch stopped safely:', error?.name || 'unknown error');
-        return jsonResponse({ error: 'archive_failed', completed }, 503);
-      }
+  }
+
+  return {
+    status: 200,
+    body: { action: 'archive', scanned: rows.length, completed, hasMore: rows.length === limit },
+  };
+};
+
+const handleBackupArchiveApi = async (request, env) => {
+  if (request.method !== 'POST') return jsonResponse({ error: 'method_not_allowed' }, 405);
+
+  const suppliedSecret = request.headers.get('Authorization')?.match(/^Bearer\s+(.+)$/i)?.[1];
+  if (!env.BACKUP_ADMIN_SECRET || env.BACKUP_ADMIN_SECRET.length < 32
+    || !constantTimeEqual(suppliedSecret, env.BACKUP_ADMIN_SECRET)) {
+    return jsonResponse({ error: 'authentication_required' }, 401);
+  }
+  if (!env.BACKUP_KV) return jsonResponse({ error: 'backup_kv_not_configured' }, 503);
+
+  const payload = await readJson(request, 4096);
+  const action = payload?.action;
+  if (!['archive', 'restore'].includes(action)) return jsonResponse({ error: 'invalid_action' }, 400);
+
+  const requestedLimit = Number(payload.limit);
+  const limit = Number.isFinite(requestedLimit) && requestedLimit > 0
+    ? Math.min(2, Math.floor(requestedLimit))
+    : 2;
+
+  if (action === 'archive') {
+    const result = await archiveBackupBatch(env, limit);
+    return jsonResponse(result.body, result.status);
+  }
+
+  const filter = 'backup_data=is.null&backup_kv_key=not.is.null';
+  let rows;
+  try {
+    rows = await supabaseRequest(
+      env,
+      `fazatak_backups?select=id,backup_data,backup_kv_key&${filter}&order=id.asc&limit=${limit}`
+    );
+  } catch (error) {
+    console.warn('[BackupArchive] Batch query failed:', error?.name || 'unknown error');
+    return jsonResponse({ error: 'archive_unavailable' }, 503);
+  }
+
+  let completed = 0;
+  for (const row of rows || []) {
+    try {
+      const backupData = await readKvBackup(env, row.backup_kv_key);
+      const updated = await supabaseRequest(
+        env,
+        `fazatak_backups?id=eq.${encodeURIComponent(row.id)}&backup_data=is.null&backup_kv_key=eq.${encodeURIComponent(row.backup_kv_key)}&select=id`,
+        {
+          method: 'PATCH',
+          headers: { Prefer: 'return=representation' },
+          body: JSON.stringify({ backup_data: backupData }),
+        }
+      );
+      if (updated?.length) completed += 1;
+    } catch (error) {
+      console.warn('[BackupArchive] Batch stopped safely:', error?.name || 'unknown error');
+      return jsonResponse({ error: 'archive_failed', completed }, 503);
     }
   }
 
@@ -979,6 +999,21 @@ const runScheduledNotifications = async (env) => {
   }
 };
 
+const runScheduledBackupArchive = async (env) => {
+  try {
+    const batch = await archiveBackupBatch(env, 2);
+    if (batch.status !== 200) {
+      console.warn('[BackupArchive] Scheduled batch failed:', batch.body.error);
+      return;
+    }
+    if (batch.body.scanned) {
+      console.log('[BackupArchive] Scheduled batch:', `${batch.body.completed}/${batch.body.scanned} rows`, `hasMore=${batch.body.hasMore}`);
+    }
+  } catch (error) {
+    console.warn('[BackupArchive] Scheduled batch failed:', error?.name || 'unknown error');
+  }
+};
+
 const CORS_ORIGINS = new Set([
   'https://fazatak.pages.dev',
   'capacitor://localhost',
@@ -1023,7 +1058,12 @@ export default {
   },
 
   async scheduled(_controller, env, ctx) {
-    ctx.waitUntil(runScheduledNotifications(env));
+    ctx.waitUntil(Promise.all([
+      runScheduledNotifications(env).catch((error) => {
+        console.warn('[Push] Scheduled notifications failed:', error?.name || 'unknown error');
+      }),
+      runScheduledBackupArchive(env),
+    ]));
   },
 };
 
