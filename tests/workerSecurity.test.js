@@ -35,11 +35,15 @@ const createMock = async ({ withBackupKV = false, legacyBackups = [] } = {}) => 
   const backupObjects = new Map();
   let corruptBackupReads = false;
   const backupKV = {
-    put: async (key, value) => backupObjects.set(key, new Uint8Array(value)),
-    get: async (key) => {
+    put: async (key, value) => {
+      const bytes = typeof value === 'string' ? new TextEncoder().encode(value) : new Uint8Array(value);
+      backupObjects.set(key, bytes);
+    },
+    get: async (key, format) => {
       const value = backupObjects.get(key);
       if (!value) return null;
-      if (corruptBackupReads) return new TextEncoder().encode('{invalid').buffer;
+      if (corruptBackupReads) return format === 'text' ? '{invalid' : new TextEncoder().encode('{invalid').buffer;
+      if (format === 'text') return new TextDecoder().decode(value);
       return value.buffer.slice(value.byteOffset, value.byteOffset + value.byteLength);
     },
     delete: async (key) => backupObjects.delete(key),
@@ -313,7 +317,7 @@ test('legacy backups move to KV only after verification and can be restored', as
     assert.equal(new Set(mock.legacyBackupRows.map((row) => row.backup_kv_key.split('#')[0])).size, 1);
     for (const row of mock.legacyBackupRows) {
       assert.equal(row.backup_data, null);
-      assert.match(row.backup_kv_key, /^legacy\/fazatak_backups\/batch-[0-9a-f-]+\.json\.gz#/);
+      assert.match(row.backup_kv_key, /^legacy\/fazatak_backups\/batch-[0-9a-f-]+\.json#/);
       assert.ok(row.backup_kv_key.endsWith(`#${encodeURIComponent(row.id)}`));
     }
 
@@ -328,6 +332,35 @@ test('legacy backups move to KV only after verification and can be restored', as
     assert.deepEqual(mock.legacyBackupRows.map((row) => row.backup_data), backupPayloads);
     assert.ok(mock.legacyBackupRows.every((row) => row.backup_kv_key === null));
     assert.equal(mock.backupObjects.size, 1);
+  } finally {
+    mock.restore();
+  }
+});
+
+test('legacy gzip KV backups remain restorable after raw JSON archives are introduced', async () => {
+  const id = '00000000-0000-0000-0000-000000000009';
+  const key = 'legacy/fazatak_backups/batch-00000000-0000-0000-0000-000000000009.json.gz';
+  const backupPayload = { version: '2', tables: { customers: [{ id: 9, name: 'Legacy archive' }] } };
+  const mock = await createMock({
+    withBackupKV: true,
+    legacyBackups: [{ id, backup_data: null, backup_kv_key: `${key}#${id}` }],
+  });
+  const compressed = new Uint8Array(await new Response(
+    new Blob([JSON.stringify({ version: 1, items: [{ id, data: backupPayload }] })])
+      .stream().pipeThrough(new CompressionStream('gzip'))
+  ).arrayBuffer());
+  mock.backupObjects.set(key, compressed);
+
+  try {
+    const response = await handleBackupArchiveApi(postJson('https://app.example/api/admin/backup-archive', {
+      action: 'restore',
+      limit: 1,
+    }, { Authorization: `Bearer ${mock.env.BACKUP_ADMIN_SECRET}` }), mock.env);
+
+    assert.equal(response.status, 200);
+    assert.equal((await response.json()).completed, 1);
+    assert.deepEqual(mock.legacyBackupRows[0].backup_data, backupPayload);
+    assert.equal(mock.legacyBackupRows[0].backup_kv_key, null);
   } finally {
     mock.restore();
   }
