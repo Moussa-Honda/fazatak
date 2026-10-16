@@ -23,6 +23,4 @@ alter table fazatak_push_subscriptions enable row level security;
 drop policy if exists "Allow all operations for anon on push subscriptions"
   on fazatak_push_subscriptions;
 
-create policy "Allow all operations for anon on push subscriptions"
-  on fazatak_push_subscriptions
-  for all using (true) with check (true);
+revoke all on table public.fazatak_push_subscriptions from anon, authenticated;
